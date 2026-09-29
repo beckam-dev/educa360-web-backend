@@ -1,15 +1,26 @@
 # =========================
 # Etapa 1: Build
 # =========================
-FROM maven:3.9-eclipse-temurin-25 AS build
+FROM eclipse-temurin:25-jdk AS build
 
 WORKDIR /app
 
+# Copiamos Maven Wrapper
+COPY .mvn .mvn
+COPY mvnw .
 COPY pom.xml .
 
+# Damos permisos de ejecución al Maven Wrapper
+RUN chmod +x mvnw
+
+# Descargamos las dependencias
+RUN ./mvnw dependency:go-offline -B
+
+# Copiamos el código fuente
 COPY src ./src
 
-RUN mvn clean package -DskipTests
+# Compilamos el proyecto
+RUN ./mvnw clean package -DskipTests
 
 
 # =========================
