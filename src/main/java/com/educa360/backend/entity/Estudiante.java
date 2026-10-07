@@ -13,12 +13,24 @@ public class Estudiante {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /*
+     * Cada estudiante tiene una cuenta de usuario asociada.
+     */
     @OneToOne(cascade = CascadeType.ALL, orphanRemoval = true)
     @JoinColumn(name = "user_id", unique = true, nullable = false)
     private User user;
 
+    /*
+     * Datos propios del estudiante.
+     */
+    @Column(nullable = false)
     private LocalDate fechaNacimiento;
 
+    /*
+     * Fecha en la que el estudiante ingresó a la institución.
+     * NO representa la fecha de matrícula de un año académico.
+     */
+    @Column(nullable = false, updatable = false)
     private LocalDate fechaIngreso;
 
     public enum EstadoEstudiante {
@@ -29,9 +41,10 @@ public class Estudiante {
     }
 
     @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private EstadoEstudiante estado = EstadoEstudiante.ACTIVO;
 
-    @Column(nullable = true)
+    @Column
     private LocalDateTime updatedAt;
 
     // Constructors
@@ -88,13 +101,25 @@ public class Estudiante {
         this.estado = estado;
     }
 
-    // Método helper: ¿El estudiante, esta matrículado?
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
 
+    /*
+     * Un estudiante está habilitado institucionalmente
+     * mientras se encuentre en estado ACTIVO.
+     *
+     * Esto NO significa que esté matriculado en el periodo actual.
+     * La matrícula se manejará mediante la entidad Matricula.
+     */
     public boolean estaHabilitado() {
         return this.estado == EstadoEstudiante.ACTIVO;
     }
 
-    // toString para depuración
+    @PreUpdate
+    void update() {
+        this.updatedAt = LocalDateTime.now();
+    }
 
     @Override
     public String toString() {
@@ -104,13 +129,7 @@ public class Estudiante {
                 ", fechaNacimiento=" + fechaNacimiento +
                 ", fechaIngreso=" + fechaIngreso +
                 ", estado=" + estado +
-                ", updatedAt=" + (updatedAt == null ? "No ha sufrido cambios" : updatedAt) +
+                ", updatedAt=" + updatedAt +
                 '}';
     }
-
-    @PreUpdate
-    void update() {
-        this.updatedAt = LocalDateTime.now();
-    }
-
 }
