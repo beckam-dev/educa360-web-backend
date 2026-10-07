@@ -16,7 +16,7 @@ public class Docente {
 
     // Relación 1:1 con User (un docente tiene un usuario único)
     @OneToOne(cascade = CascadeType.ALL, orphanRemoval = true)
-    @JoinColumn(name = "user_id", unique = true)
+    @JoinColumn(name = "user_id", unique = true, nullable = false)
     private User user;
 
     // Atributos específicos del docente
