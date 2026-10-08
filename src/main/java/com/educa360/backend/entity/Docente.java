@@ -2,6 +2,7 @@ package com.educa360.backend.entity;
 
 import jakarta.persistence.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.Set;
@@ -30,14 +31,17 @@ public class Docente {
     )
     private Set<Materia> materias = new HashSet<>(); // Ej: "Matemáticas", "Física", "Química"
 
-    private LocalDateTime fechaIngreso;
+    private LocalDate fechaIngreso;
+
+    @Column
+    private LocalDateTime updatedAt;
 
     private boolean activo; // Para dar de baja lógico sin borrar (soft-delete)
 
     // Constructors
 
     public Docente() {
-        this.fechaIngreso = LocalDateTime.now();
+        this.fechaIngreso = LocalDate.now();
         this.activo = true;
     }
 
@@ -77,11 +81,11 @@ public class Docente {
         return materias;
     }
 
-    public LocalDateTime getFechaIngreso() {
+    public LocalDate getFechaIngreso() {
         return fechaIngreso;
     }
 
-    public void setFechaIngreso(LocalDateTime fechaIngreso) {
+    public void setFechaIngreso(LocalDate fechaIngreso) {
         this.fechaIngreso = fechaIngreso;
     }
 
@@ -103,6 +107,11 @@ public class Docente {
     public void quitarMateria(Materia materia) {
         materias.remove(materia);
         materia.getDocentes().remove(this);
+    }
+
+    @PreUpdate
+    void update() {
+        this.updatedAt = LocalDateTime.now();
     }
 
     // toString para depuración
