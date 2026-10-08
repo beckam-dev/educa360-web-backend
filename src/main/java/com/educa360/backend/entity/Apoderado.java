@@ -91,4 +91,14 @@ public class Apoderado {
         estudiantes.remove(relacion);
         relacion.setApoderado(null);
     }
+
+    @Override
+    public String toString() {
+        return "Apoderado{" +
+                "id=" + id +
+                ", user=" + user +
+                ", telefonos=" + telefonos +
+                ", estudiantes=" + estudiantes +
+                '}';
+    }
 }

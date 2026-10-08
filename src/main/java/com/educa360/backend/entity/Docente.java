@@ -31,8 +31,6 @@ public class Docente {
     )
     private Set<Materia> materias = new HashSet<>(); // Ej: "Matemáticas", "Física", "Química"
 
-    private LocalDate fechaIngreso;
-
     @Column
     private LocalDateTime updatedAt;
 
@@ -41,7 +39,6 @@ public class Docente {
     // Constructors
 
     public Docente() {
-        this.fechaIngreso = LocalDate.now();
         this.activo = true;
     }
 
@@ -81,14 +78,6 @@ public class Docente {
         return materias;
     }
 
-    public LocalDate getFechaIngreso() {
-        return fechaIngreso;
-    }
-
-    public void setFechaIngreso(LocalDate fechaIngreso) {
-        this.fechaIngreso = fechaIngreso;
-    }
-
     public boolean isActivo() {
         return activo;
     }
@@ -123,7 +112,7 @@ public class Docente {
                 ", user=" + user +
                 ", titulo='" + titulo + '\'' +
                 ", materias=" + materias +
-                ", fechaIngreso=" + fechaIngreso +
+                ", fecha de registro=" + this.user.getCreatedAt() +
                 ", activo=" + activo +
                 '}';
     }

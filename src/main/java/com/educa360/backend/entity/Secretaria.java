@@ -17,8 +17,6 @@ public class Secretaria {
     @JoinColumn(name = "user_id", unique = true, nullable = false)
     private User user;
 
-    private LocalDate fechaIngreso;
-
     @Column
     private LocalDateTime updatedAt;
 
@@ -27,7 +25,6 @@ public class Secretaria {
     // CONSTRUCTORS
 
     public Secretaria() {
-        this.fechaIngreso = LocalDate.now();
         this.activo = true;
     }
 
@@ -54,14 +51,6 @@ public class Secretaria {
         this.user = user;
     }
 
-    public LocalDate getFechaIngreso() {
-        return fechaIngreso;
-    }
-
-    public void setFechaIngreso(LocalDate fechaIngreso) {
-        this.fechaIngreso = fechaIngreso;
-    }
-
     public boolean isActivo() {
         return activo;
     }
@@ -82,7 +71,7 @@ public class Secretaria {
         return "Secretaria{" +
                 "id=" + id +
                 ", user=" + user +
-                ", fechaIngreso=" + fechaIngreso +
+                ", fecha de registro=" + this.user.getCreatedAt() +
                 ", activo=" + activo +
                 '}';
     }

@@ -26,13 +26,6 @@ public class Estudiante {
     @Column(nullable = false)
     private LocalDate fechaNacimiento;
 
-    /*
-     * Fecha en la que el estudiante ingresó a la institución.
-     * NO representa la fecha de matrícula de un año académico.
-     */
-    @Column(nullable = false, updatable = false)
-    private LocalDate fechaIngreso;
-
     public enum EstadoEstudiante {
         ACTIVO,
         TRASLADADO,
@@ -42,7 +35,7 @@ public class Estudiante {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private EstadoEstudiante estado = EstadoEstudiante.ACTIVO;
+    private EstadoEstudiante estado;
 
     @Column
     private LocalDateTime updatedAt;
@@ -50,7 +43,7 @@ public class Estudiante {
     // Constructors
 
     public Estudiante() {
-        this.fechaIngreso = LocalDate.now();
+        this.estado = EstadoEstudiante.ACTIVO;
     }
 
     public Estudiante(User user, LocalDate fechaNacimiento) {
@@ -83,14 +76,6 @@ public class Estudiante {
 
     public void setFechaNacimiento(LocalDate fechaNacimiento) {
         this.fechaNacimiento = fechaNacimiento;
-    }
-
-    public LocalDate getFechaIngreso() {
-        return fechaIngreso;
-    }
-
-    public void setFechaIngreso(LocalDate fechaIngreso) {
-        this.fechaIngreso = fechaIngreso;
     }
 
     public EstadoEstudiante getEstado() {
@@ -127,7 +112,7 @@ public class Estudiante {
                 "id=" + id +
                 ", user=" + user +
                 ", fechaNacimiento=" + fechaNacimiento +
-                ", fechaIngreso=" + fechaIngreso +
+                ", fecha de registro=" + this.user.getCreatedAt() +
                 ", estado=" + estado +
                 ", updatedAt=" + updatedAt +
                 '}';
