@@ -25,6 +25,7 @@ public class User {
     // Enum de roles del sistema (ADMIN, DOCENTE, ESTUDIANTE, APODERADO)
     public enum Role {
         ADMIN,
+        SECRETARIA,
         DOCENTE,
         ESTUDIANTE,
         APODERADO
