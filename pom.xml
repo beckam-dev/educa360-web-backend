@@ -15,7 +15,20 @@
 	<description>API RESTful para la gestión académica del Colegio Nuestra Señora de Monserrat</description>
 	<properties>
 		<java.version>25</java.version>
+		<testcontainers.version>1.21.4</testcontainers.version>
 	</properties>
+	<dependencyManagement>
+		<dependencies>
+			<!-- Spring Boot no gestiona Testcontainers: importamos su BOM -->
+			<dependency>
+				<groupId>org.testcontainers</groupId>
+				<artifactId>testcontainers-bom</artifactId>
+				<version>${testcontainers.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -96,6 +109,18 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-websocket-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!-- Tests de integración: BD PostgreSQL real y desechable por corrida -->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>junit-jupiter</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

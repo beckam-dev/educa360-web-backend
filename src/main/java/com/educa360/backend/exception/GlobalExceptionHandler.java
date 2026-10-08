@@ -62,7 +62,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return build(HttpStatus.UNAUTHORIZED, ex.getMessage(), request, null);
     }
 
-    // 403: autenticado pero sin permiso (@PreAuthorize / bootstrap de registro)
+    // 403: autenticado pero sin permiso (@PreAuthorize / alta inicial de registro)
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<Object> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
         return build(HttpStatus.FORBIDDEN, ex.getMessage(), request, null);
@@ -74,10 +74,21 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request, null);
     }
 
-    // 409: violación de constraints de la BD (red de seguridad)
+    // 409: violación de constraints de la BD (red de seguridad).
+    // Se identifica el constraint por la columna del DETAIL de Postgres
+    // ("Key (email)=(...) already exists") sin filtrar el SQL al cliente.
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Object> handleIntegrity(DataIntegrityViolationException ex, HttpServletRequest request) {
-        return build(HttpStatus.CONFLICT, "Violación de integridad de datos: el email o el DNI ya existen", request, null);
+        String causa = String.valueOf(ex.getMostSpecificCause().getMessage());
+        String mensaje = "Violación de integridad de datos";
+        if (causa.contains("(email)=")) {
+            mensaje = "El email ya está registrado";
+        } else if (causa.contains("(dni)=")) {
+            mensaje = "El DNI ya está registrado";
+        } else if (causa.contains("(user_id)=")) {
+            mensaje = "La relación con la cuenta de usuario ya existe";
+        }
+        return build(HttpStatus.CONFLICT, mensaje, request, null);
     }
 
     // 500: todo lo no previsto (los errores de Spring MVC NO llegan aquí:

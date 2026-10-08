@@ -94,7 +94,7 @@
 ## 5. Módulos y Reglas de Negocio Esenciales
 - **Autenticación:**
   - `POST /api/v1/auth/login` (`{email, password}`) → `200` con `{token, tokenType: "Bearer", expiresIn (segundos), user}`.
-  - `POST /api/v1/auth/register` → alta de cuenta. **Bootstrap:** si la BD no tiene ninguna cuenta, cualquiera puede crear la primera y su rol es **siempre `ADMIN`** (se ignora el `rol` del request para no dejar el sistema sin administradores); a partir de ahí sólo un `ADMIN` autenticado puede crear cuentas y ahí sí se respeta el rol pedido.
+  - `POST /api/v1/auth/register` → alta de cuenta. **Alta inicial (bootstrapping):** si la BD no tiene ninguna cuenta, cualquiera puede crear la primera y su rol es **siempre `ADMIN`** (se ignora el `rol` del request para no dejar el sistema sin administradores); a partir de ahí sólo un `ADMIN` autenticado puede crear cuentas y ahí sí se respeta el rol pedido. El email se normaliza a minúsculas y el DNI debe tener 8 dígitos.
   - `GET /api/v1/auth/me` → perfil del usuario contenido en el token.
   - El cliente envía `Authorization: Bearer <token>` en cada petición. API **stateless**: sin sesiones ni cookies.
   - Errores en JSON (`ApiError`, sin stack traces): `400` validación de DTO con detalle campo a campo o cuerpo ilegible, `401` credenciales inválidas o token ausente, `403` usuario inactivo o sin permiso, `404`/`405`/`415` para ruta, método o `Content-Type` incorrectos, `409` email/DNI duplicado, `500` sólo para fallos inesperados.

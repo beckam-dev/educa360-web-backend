@@ -29,7 +29,7 @@ import java.util.List;
  * Configuración central de la seguridad:
  *
  * - Stateless (sin sesiones): la identidad viaja en el JWT.
- * - Público: login, registro (bootstrap) y Swagger.
+ * - Público: login, alta inicial de la primera cuenta y Swagger.
  * - Todo lo demás: requiere token válido.
  * - Los errores 401/403 se responden en JSON, no en HTML.
  */

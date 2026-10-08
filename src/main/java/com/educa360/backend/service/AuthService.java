@@ -59,27 +59,30 @@ public class AuthService {
     /**
      * Alta de cuentas.
      *
-     * Bootstrap: si la BD no tiene NINGÚN usuario, cualquiera puede crear
-     * el primero. En ese caso el rol SIEMPRE es ADMIN (se ignora el del
-     * request): si el primer usuario naciera con otro rol, el sistema
-     * quedaría bloqueado, porque a partir de ahí sólo un ADMIN puede
-     * crear cuentas. Ese mismo "truco" neutraliza la condición de carrera
-     * de count(): como peor caso se crearían dos ADMIN, nunca un sistema
-     * sin administradores.
+     * Alta inicial (patrón de "bootstrapping"): si la BD no tiene NINGÚN
+     * usuario, cualquiera puede crear el primero. En ese caso el rol SIEMPRE
+     * es ADMIN (se ignora el del request): si el primer usuario naciera con
+     * otro rol, el sistema quedaría bloqueado, porque a partir de ahí sólo un
+     * ADMIN puede crear cuentas. Ese mismo "truco" neutraliza la condición de
+     * carrera de count(): como peor caso se crearían dos ADMIN, nunca un
+     * sistema sin administradores.
      */
     @Transactional
     public AuthResponse register(RegisterRequest request) {
-        boolean bootstrap = userRepository.count() == 0;
+        boolean esPrimerUsuario = userRepository.count() == 0;
 
-        if (!bootstrap && !isCurrentAdmin()) {
+        if (!esPrimerUsuario && !isCurrentAdmin()) {
             throw new AccessDeniedException("Sólo un ADMIN puede crear cuentas de usuario");
         }
 
         if (userRepository.existsByEmail(request.email())) {
             throw new ConflictException("El email " + request.email() + " ya está registrado");
         }
+        if (userRepository.existsByDni(request.dni())) {
+            throw new ConflictException("El DNI " + request.dni() + " ya está registrado");
+        }
 
-        User.Role rol = bootstrap
+        User.Role rol = esPrimerUsuario
                 ? User.Role.ADMIN  // forzado: no se confía en el request
                 : (request.rol() != null ? request.rol() : User.Role.ADMIN);
 
