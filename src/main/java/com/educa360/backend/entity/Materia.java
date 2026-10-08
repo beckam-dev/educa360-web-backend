@@ -67,7 +67,7 @@ public class Materia extends Auditable {
         this.docentes = docentes;
     }
 
-    // toString para depuración
+    // toString seguro: sin docentes (evita la recursión Docente <-> Materia)
 
     @Override
     public String toString() {
@@ -76,7 +76,6 @@ public class Materia extends Auditable {
                 ", nombre='" + nombre + '\'' +
                 ", descripcion='" + descripcion + '\'' +
                 ", activa=" + activa +
-                ", docentes=" + docentes +
                 '}';
     }
 }

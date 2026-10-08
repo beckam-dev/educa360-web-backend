@@ -50,12 +50,13 @@ public class Secretaria extends Auditable {
         user.quitarTelefono(telefono);
     }
 
+    // toString seguro: sólo ids y campos simples
+
     @Override
     public String toString() {
         return "Secretaria{" +
                 "id=" + getId() +
-                ", user=" + user +
-                ", fecha de registro=" + (user != null ? user.getCreatedAt() : null) +
+                ", userId=" + (user != null ? user.getId() : null) +
                 '}';
     }
 

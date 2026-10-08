@@ -5,6 +5,8 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
@@ -24,8 +26,13 @@ import java.util.function.Function;
 @Service
 public class JwtService {
 
+    private static final Logger log = LoggerFactory.getLogger(JwtService.class);
+
     /** HS256 exige una clave de al menos 32 bytes. */
     private static final int MIN_SECRET_BYTES = 32;
+
+    /** Prefijo del secreto de desarrollo: si se detecta, se avisa por log. */
+    private static final String DEV_SECRET_MARKER = "educa360-dev-";
 
     private final SecretKey signingKey;
     private final long expirationMs;
@@ -37,6 +44,10 @@ public class JwtService {
         if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < MIN_SECRET_BYTES) {
             throw new IllegalStateException(
                     "app.jwt.secret debe tener al menos 32 bytes para firmar con HS256");
+        }
+        if (secret.startsWith(DEV_SECRET_MARKER)) {
+            log.warn("Se está usando el secreto JWT de DESARROLLO. " +
+                    "Define APP_JWT_SECRET con una clave propia antes de publicar.");
         }
         this.signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expirationMs = expirationMs;

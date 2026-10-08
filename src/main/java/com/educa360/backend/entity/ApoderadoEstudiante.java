@@ -109,12 +109,13 @@ public class ApoderadoEstudiante extends Auditable {
     }
 
     /*
-     * equals/hashCode son obligatorios porque esta entidad vive
-     * dentro de un Set. Sin ellos, Hibernate permitiría duplicados
-     * silenciosos de la misma pareja apoderado-estudiante.
+     * Vive dentro de un Set, así que necesita equals/hashCode.
      *
-     * Persistido: se compara por id.
-     * Transitorio: se compara por la pareja (referencias).
+     * Clave de negocio ESTABLE: apoderado + estudiante, fijados en el
+     * constructor y que nunca cambian. NO se usa el id: el id pasa de
+     * null a un valor al persistir, y si el hashCode cambiara después de
+     * insertar el elemento en el Set, el Set "perdería" el elemento y
+     * quitarEstudiante()/orphanRemoval dejarían de funcionar.
      */
 
     @Override
@@ -122,22 +123,27 @@ public class ApoderadoEstudiante extends Auditable {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         ApoderadoEstudiante that = (ApoderadoEstudiante) o;
-
-        if (getId() != null && that.getId() != null) {
-            return getId().equals(that.getId());
-        }
         return apoderado != null && apoderado == that.apoderado
                 && estudiante != null && estudiante == that.estudiante;
     }
 
     @Override
     public int hashCode() {
-        if (getId() != null) {
-            return Objects.hash(getId());
-        }
         return Objects.hash(
                 System.identityHashCode(apoderado),
                 System.identityHashCode(estudiante)
         );
+    }
+
+    @Override
+    public String toString() {
+        return "ApoderadoEstudiante{" +
+                "id=" + getId() +
+                ", apoderadoId=" + (apoderado != null ? apoderado.getId() : null) +
+                ", estudianteId=" + (estudiante != null ? estudiante.getId() : null) +
+                ", parentesco=" + parentesco +
+                ", responsablePrincipal=" + responsablePrincipal +
+                ", activo=" + activo +
+                '}';
     }
 }

@@ -3,8 +3,6 @@ package com.educa360.backend.entity;
 import jakarta.persistence.*;
 
 import java.time.LocalDate;
-import java.util.HashSet;
-import java.util.Set;
 
 @Entity
 @Table(name = "estudiantes")
@@ -81,13 +79,14 @@ public class Estudiante extends Auditable {
         return this.estado == EstadoEstudiante.ACTIVO;
     }
 
+    // toString seguro: sólo ids y campos simples (sin colecciones lazy)
+
     @Override
     public String toString() {
         return "Estudiante{" +
                 "id=" + getId() +
-                ", user=" + user +
+                ", userId=" + (user != null ? user.getId() : null) +
                 ", fechaNacimiento=" + fechaNacimiento +
-                ", fecha de registro=" + (user != null ? user.getCreatedAt() : null) +
                 ", estado=" + estado +
                 '}';
     }

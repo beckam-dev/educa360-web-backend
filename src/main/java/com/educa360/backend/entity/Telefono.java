@@ -54,27 +54,28 @@ public class Telefono extends Auditable {
         this.user = user;
     }
 
-    // Vive dentro de un Set: requiere equals/hashCode
+    /*
+     * Vive dentro de un Set: equals/hashCode con clave de negocio estable
+     * (dueño + número), SIN el id (el id cambia al persistir y rompería
+     * la búsqueda dentro del Set). La restricción unique(user_id, numero)
+     * de la BD es la garantía definitiva contra duplicados.
+     *
+     * Ojo: si se cambia el número de un teléfono ya guardado, hay que
+     * quitarlo y volver a agregarlo al Set (el hashCode depende de él).
+     */
 
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         Telefono that = (Telefono) o;
-
-        if (getId() != null && that.getId() != null) {
-            return getId().equals(that.getId());
-        }
-        return Objects.equals(numero, that.numero)
-                && user != null && user == that.user;
+        return user != null && user == that.user
+                && Objects.equals(numero, that.numero);
     }
 
     @Override
     public int hashCode() {
-        if (getId() != null) {
-            return Objects.hash(getId());
-        }
-        return Objects.hash(numero, System.identityHashCode(user));
+        return Objects.hash(System.identityHashCode(user), numero);
     }
 
     @Override

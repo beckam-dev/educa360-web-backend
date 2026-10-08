@@ -81,13 +81,13 @@ public class Apoderado extends Auditable {
         relacion.setApoderado(null);
     }
 
+    // toString seguro: sin telefonos ni estudiantes (colecciones lazy)
+
     @Override
     public String toString() {
         return "Apoderado{" +
                 "id=" + getId() +
-                ", user=" + user +
-                ", telefonos=" + getTelefonos() +
-                ", estudiantes=" + estudiantes +
+                ", userId=" + (user != null ? user.getId() : null) +
                 '}';
     }
 }

@@ -94,10 +94,11 @@
 ## 5. Módulos y Reglas de Negocio Esenciales
 - **Autenticación:**
   - `POST /api/v1/auth/login` (`{email, password}`) → `200` con `{token, tokenType: "Bearer", expiresIn (segundos), user}`.
-  - `POST /api/v1/auth/register` → alta de cuenta. **Bootstrap:** si la BD no tiene ninguna cuenta, cualquiera puede crear la primera (`ADMIN` por defecto); a partir de ahí sólo un `ADMIN` autenticado puede crear cuentas.
+  - `POST /api/v1/auth/register` → alta de cuenta. **Bootstrap:** si la BD no tiene ninguna cuenta, cualquiera puede crear la primera y su rol es **siempre `ADMIN`** (se ignora el `rol` del request para no dejar el sistema sin administradores); a partir de ahí sólo un `ADMIN` autenticado puede crear cuentas y ahí sí se respeta el rol pedido.
   - `GET /api/v1/auth/me` → perfil del usuario contenido en el token.
   - El cliente envía `Authorization: Bearer <token>` en cada petición. API **stateless**: sin sesiones ni cookies.
-  - Errores en JSON (`ApiError`): `401` credenciales inválidas o token ausente, `403` usuario inactivo o sin permiso, `409` email/DNI duplicado, `400` validación de DTO con el detalle campo a campo.
+  - Errores en JSON (`ApiError`, sin stack traces): `400` validación de DTO con detalle campo a campo o cuerpo ilegible, `401` credenciales inválidas o token ausente, `403` usuario inactivo o sin permiso, `404`/`405`/`415` para ruta, método o `Content-Type` incorrectos, `409` email/DNI duplicado, `500` sólo para fallos inesperados.
+  - `AppCORS`: orígenes del SPA por propiedad `app.cors.allowed-origins` (sin credenciales: la auth va en el header).
   - Validación de roles mediante `@PreAuthorize("hasRole('ADMIN')")`, `@PreAuthorize("hasRole('SECRETARIA')")`, `@PreAuthorize("hasRole('DOCENTE')")`, etc.
   - Endpoints de prueba de RBAC: `GET /api/v1/demo/{admin|secretaria|docente|estudiante|apoderado}` y `/api/v1/demo/authenticated`.
 - **Flujo de Justificaciones:**

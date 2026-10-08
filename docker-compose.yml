@@ -11,6 +11,10 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      # Obligatorio: si no está definido, el contenedor NO arranca en vez
+      # de caer en el secreto de desarrollo de application.properties.
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?Define APP_JWT_SECRET en .env (mínimo 32 bytes)}
+      APP_JWT_EXPIRATION_MS: ${APP_JWT_EXPIRATION_MS:-86400000}
     depends_on:
       postgres:
         condition: service_healthy

@@ -60,9 +60,12 @@ public class AuthService {
      * Alta de cuentas.
      *
      * Bootstrap: si la BD no tiene NINGÚN usuario, cualquiera puede crear
-     * el primero (ADMIN por defecto). A partir de ahí, sólo un ADMIN
-     * autenticado puede crear cuentas. Así no queda un endpoint abierto
-     * olvidado en producción.
+     * el primero. En ese caso el rol SIEMPRE es ADMIN (se ignora el del
+     * request): si el primer usuario naciera con otro rol, el sistema
+     * quedaría bloqueado, porque a partir de ahí sólo un ADMIN puede
+     * crear cuentas. Ese mismo "truco" neutraliza la condición de carrera
+     * de count(): como peor caso se crearían dos ADMIN, nunca un sistema
+     * sin administradores.
      */
     @Transactional
     public AuthResponse register(RegisterRequest request) {
@@ -76,13 +79,17 @@ public class AuthService {
             throw new ConflictException("El email " + request.email() + " ya está registrado");
         }
 
+        User.Role rol = bootstrap
+                ? User.Role.ADMIN  // forzado: no se confía en el request
+                : (request.rol() != null ? request.rol() : User.Role.ADMIN);
+
         User user = new User(
                 request.email(),
                 passwordEncoder.encode(request.password()),
                 request.nombres(),
                 request.apellidos(),
                 request.dni(),
-                request.rol() != null ? request.rol() : User.Role.ADMIN
+                rol
         );
 
         User guardado = userRepository.save(user);

@@ -2,6 +2,7 @@ package com.educa360.backend.security;
 
 import com.educa360.backend.exception.ApiError;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -38,12 +39,18 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
-    // Boot 4 / Spring Framework 7: el ObjectMapper auto-configurado es Jackson 3 (tools.jackson)
     private final ObjectMapper objectMapper;
+    private final List<String> allowedOrigins;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter, ObjectMapper objectMapper) {
+    // Boot 4 / Spring Framework 7: el ObjectMapper auto-configurado es Jackson 3 (tools.jackson)
+    public SecurityConfig(
+            JwtAuthenticationFilter jwtAuthenticationFilter,
+            ObjectMapper objectMapper,
+            @Value("${app.cors.allowed-origins:*}") List<String> allowedOrigins
+    ) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.objectMapper = objectMapper;
+        this.allowedOrigins = allowedOrigins;
     }
 
     @Bean
@@ -72,15 +79,20 @@ public class SecurityConfig {
 
     /**
      * CORS: el SPA (React + Vite) corre en otro origen/puerto.
-     * En producción se restringe a los dominios reales.
+     * Los orígenes vienen de la propiedad app.cors.allowed-origins.
+     *
+     * allowCredentials(false) es intencional: la autenticación viaja en el
+     * header Authorization (Bearer), no en cookies, así que no hacen falta
+     * credenciales. Combinar "*" con credenciales(true) sí sería peligroso:
+     * permitiría a cualquier sitio hacer peticiones con credenciales.
      */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOriginPatterns(List.of("*")); // TODO producción: dominios exactos
+        config.setAllowedOriginPatterns(allowedOrigins);
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
-        config.setAllowCredentials(true);
+        config.setAllowCredentials(false);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

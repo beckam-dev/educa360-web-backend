@@ -88,16 +88,16 @@ public class Docente extends Auditable {
         materia.getDocentes().remove(this);
     }
 
-    // toString para depuración
+    // toString seguro para logs: sólo ids y campos simples.
+    // NO imprimir colecciones (lazy -> LazyInitializationException)
+    // ni entidades cruzadas (Docente -> materias -> docentes = recursión infinita).
 
     @Override
     public String toString() {
         return "Docente{" +
                 "id=" + getId() +
-                ", user=" + user +
+                ", userId=" + (user != null ? user.getId() : null) +
                 ", titulo='" + titulo + '\'' +
-                ", materias=" + materias +
-                ", fecha de registro=" + (user != null ? user.getCreatedAt() : null) +
                 '}';
     }
 
