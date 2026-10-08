@@ -2,6 +2,8 @@ package com.educa360.backend.entity;
 
 import jakarta.persistence.*;
 
+import java.util.Objects;
+
 @Entity
 @Table(
         name = "apoderado_estudiante",
@@ -11,11 +13,7 @@ import jakarta.persistence.*;
                 )
         }
 )
-public class ApoderadoEstudiante {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+public class ApoderadoEstudiante extends Auditable {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "apoderado_id", nullable = false)
@@ -70,10 +68,6 @@ public class ApoderadoEstudiante {
 
     // Getters and Setters
 
-    public Long getId() {
-        return id;
-    }
-
     public Apoderado getApoderado() {
         return apoderado;
     }
@@ -112,5 +106,38 @@ public class ApoderadoEstudiante {
 
     public void setActivo(boolean activo) {
         this.activo = activo;
+    }
+
+    /*
+     * equals/hashCode son obligatorios porque esta entidad vive
+     * dentro de un Set. Sin ellos, Hibernate permitiría duplicados
+     * silenciosos de la misma pareja apoderado-estudiante.
+     *
+     * Persistido: se compara por id.
+     * Transitorio: se compara por la pareja (referencias).
+     */
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ApoderadoEstudiante that = (ApoderadoEstudiante) o;
+
+        if (getId() != null && that.getId() != null) {
+            return getId().equals(that.getId());
+        }
+        return apoderado != null && apoderado == that.apoderado
+                && estudiante != null && estudiante == that.estudiante;
+    }
+
+    @Override
+    public int hashCode() {
+        if (getId() != null) {
+            return Objects.hash(getId());
+        }
+        return Objects.hash(
+                System.identityHashCode(apoderado),
+                System.identityHashCode(estudiante)
+        );
     }
 }

@@ -3,26 +3,20 @@ package com.educa360.backend.entity;
 import jakarta.persistence.*;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "estudiantes")
-public class Estudiante {
+public class Estudiante extends Auditable {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    /*
-     * Cada estudiante tiene una cuenta de usuario asociada.
-     */
-    @OneToOne(cascade = CascadeType.ALL, orphanRemoval = true)
+    // Relación 1:1 con User (un estudiante tiene un usuario único).
+    // Sin orphanRemoval: la baja lógica se controla con User.activo.
+    @OneToOne(optional = false, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
     @JoinColumn(name = "user_id", unique = true, nullable = false)
     private User user;
 
-    /*
-     * Datos propios del estudiante.
-     */
+    // Datos propios del estudiante
     @Column(nullable = false)
     private LocalDate fechaNacimiento;
 
@@ -33,12 +27,10 @@ public class Estudiante {
         EGRESADO
     }
 
+    // Estado académico (semántica distinta de User.activo, que es la baja de la cuenta)
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private EstadoEstudiante estado;
-
-    @Column
-    private LocalDateTime updatedAt;
 
     // Constructors
 
@@ -53,14 +45,6 @@ public class Estudiante {
     }
 
     // Getters and Setters
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
 
     public User getUser() {
         return user;
@@ -86,10 +70,6 @@ public class Estudiante {
         this.estado = estado;
     }
 
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
     /*
      * Un estudiante está habilitado institucionalmente
      * mientras se encuentre en estado ACTIVO.
@@ -101,20 +81,14 @@ public class Estudiante {
         return this.estado == EstadoEstudiante.ACTIVO;
     }
 
-    @PreUpdate
-    void update() {
-        this.updatedAt = LocalDateTime.now();
-    }
-
     @Override
     public String toString() {
         return "Estudiante{" +
-                "id=" + id +
+                "id=" + getId() +
                 ", user=" + user +
                 ", fechaNacimiento=" + fechaNacimiento +
-                ", fecha de registro=" + this.user.getCreatedAt() +
+                ", fecha de registro=" + (user != null ? user.getCreatedAt() : null) +
                 ", estado=" + estado +
-                ", updatedAt=" + updatedAt +
                 '}';
     }
 }

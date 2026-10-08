@@ -7,28 +7,15 @@ import java.util.Set;
 
 @Entity
 @Table(name = "apoderados")
-public class Apoderado {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+public class Apoderado extends Auditable {
 
     /*
      * Cada apoderado tiene una cuenta de usuario asociada.
+     * Sin orphanRemoval: la baja lógica se controla con User.activo.
      */
-    @OneToOne(cascade = CascadeType.ALL, orphanRemoval = true)
+    @OneToOne(optional = false, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
     @JoinColumn(name = "user_id", unique = true, nullable = false)
     private User user;
-
-    /*
-     * Un apoderado puede tener varios números de contacto.
-     */
-    @OneToMany(
-            mappedBy = "apoderado",
-            cascade = CascadeType.ALL,
-            orphanRemoval = true
-    )
-    private Set<Telefono> telefonos = new HashSet<>();
 
     /*
      * Relaciones entre este apoderado y sus estudiantes representados.
@@ -54,14 +41,6 @@ public class Apoderado {
 
     // Getters and Setters
 
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
     public User getUser() {
         return user;
     }
@@ -70,8 +49,18 @@ public class Apoderado {
         this.user = user;
     }
 
+    // Teléfonos: la colección vive en User (User.telefonos); el apoderado sólo delega.
+
     public Set<Telefono> getTelefonos() {
-        return telefonos;
+        return user == null ? Set.of() : user.getTelefonos();
+    }
+
+    public void agregarTelefono(Telefono telefono) {
+        user.agregarTelefono(telefono);
+    }
+
+    public void quitarTelefono(Telefono telefono) {
+        user.quitarTelefono(telefono);
     }
 
     public Set<ApoderadoEstudiante> getEstudiantes() {
@@ -95,9 +84,9 @@ public class Apoderado {
     @Override
     public String toString() {
         return "Apoderado{" +
-                "id=" + id +
+                "id=" + getId() +
                 ", user=" + user +
-                ", telefonos=" + telefonos +
+                ", telefonos=" + getTelefonos() +
                 ", estudiantes=" + estudiantes +
                 '}';
     }

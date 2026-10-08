@@ -1,28 +1,39 @@
 package com.educa360.backend.entity;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
-import java.time.LocalDateTime;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "users")
-public class User {
+public class User extends Auditable {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    // Único y obligatorio: es la credencial de login
+    @Column(unique = true, nullable = false)
+    @NotBlank
+    @Email
+    private String email;
 
-    private String email; // Único, se usará para el login
+    // Contraseña hasheada (BCrypt).
+    // WRITE_ONLY: Jackson nunca la incluye en una respuesta JSON.
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Column(nullable = false)
+    private String password;
 
-    private String password; // Contraseña hasheada (BCrypt)
-
+    @Column(nullable = false)
     private String nombres;
-    
+
+    @Column(nullable = false)
     private String apellidos;
 
-    @Column(unique = true)
+    @Column(unique = true, nullable = false)
     private String dni; // Documento de identidad
 
-    // Enum de roles del sistema (ADMIN, DOCENTE, ESTUDIANTE, APODERADO)
+    // Enum de roles del sistema (ADMIN, SECRETARIA, DOCENTE, ESTUDIANTE, APODERADO)
     public enum Role {
         ADMIN,
         SECRETARIA,
@@ -32,20 +43,32 @@ public class User {
     }
 
     @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private Role rol;
 
-    private boolean activo; // Para dar de baja lógico sin borrar (soft-delete)
+    // Única fuente de baja lógica del sistema (soft-delete).
+    // Los perfiles (Docente, Secretaria, ...) no duplican este estado.
+    @Column(nullable = false)
+    private boolean activo = true;
 
-    @Column(updatable = false)
-    private LocalDateTime createdAt;
-
-    @Column(nullable = true)
-    private LocalDateTime updatedAt;
+    /*
+     * Teléfonos de contacto del usuario.
+     *
+     * Vive aquí porque todos los perfiles son 1:1 con User:
+     * Docente, Secretaria y Apoderado lo usan;
+     * Estudiante no (al ser menor, la comunicación es con su apoderado).
+     */
+    @OneToMany(
+            mappedBy = "user",
+            cascade = CascadeType.ALL,
+            orphanRemoval = true
+    )
+    private Set<Telefono> telefonos = new HashSet<>();
 
     // Constructors
 
     public User() {
-        this.createdAt = LocalDateTime.now();
+        this.activo = true;
     }
 
     public User(String email, String password, String nombres, String apellidos, String dni, Role rol) {
@@ -59,14 +82,6 @@ public class User {
     }
 
     // Getters and Setters
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
 
     public String getEmail() {
         return email;
@@ -124,33 +139,35 @@ public class User {
         this.activo = activo;
     }
 
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
+    public Set<Telefono> getTelefonos() {
+        return telefonos;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
+    // Métodos helper: mantienen sincronizados ambos lados de la relación
+
+    public void agregarTelefono(Telefono telefono) {
+        telefonos.add(telefono);
+        telefono.setUser(this);
     }
 
-    // toString para depuración
+    public void quitarTelefono(Telefono telefono) {
+        telefonos.remove(telefono);
+        telefono.setUser(null);
+    }
+
+    // toString para depuración (nunca incluye la contraseña)
 
     @Override
     public String toString() {
         return "User{" +
-                "id=" + id +
+                "id=" + getId() +
                 ", email='" + email + '\'' +
                 ", nombres='" + nombres + '\'' +
                 ", apellidos='" + apellidos + '\'' +
                 ", dni='" + dni + '\'' +
                 ", rol=" + rol +
                 ", activo=" + activo +
-                ", createdAt=" + createdAt +
+                ", createdAt=" + getCreatedAt() +
                 '}';
     }
-
-    @PreUpdate
-    void update() {
-        this.updatedAt = LocalDateTime.now();
-    }
-
 }

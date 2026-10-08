@@ -7,19 +7,17 @@ import java.util.Set;
 
 @Entity
 @Table(name = "materias")
-public class Materia {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+public class Materia extends Auditable {
 
     @Column(nullable = false, unique = true)
     private String nombre;
 
     private String descripcion;
 
+    @Column(nullable = false)
     private boolean activa;
 
+    // Inverso de Docente.materias: qué docentes pueden enseñar esta materia
     @ManyToMany(mappedBy = "materias")
     private Set<Docente> docentes = new HashSet<>();
 
@@ -36,14 +34,6 @@ public class Materia {
     }
 
     // Getters and Setters
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
 
     public String getNombre() {
         return nombre;
@@ -82,7 +72,7 @@ public class Materia {
     @Override
     public String toString() {
         return "Materia{" +
-                "id=" + id +
+                "id=" + getId() +
                 ", nombre='" + nombre + '\'' +
                 ", descripcion='" + descripcion + '\'' +
                 ", activa=" + activa +

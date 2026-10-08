@@ -2,30 +2,23 @@ package com.educa360.backend.entity;
 
 import jakarta.persistence.*;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.util.Set;
 
 @Entity
-@Table
-public class Secretaria {
+@Table(name = "secretarias")
+public class Secretaria extends Auditable {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @OneToOne(cascade = CascadeType.ALL, orphanRemoval = true)
+    /*
+     * Perfil 1:1 con User.
+     * Sin orphanRemoval: la baja lógica se controla con User.activo.
+     */
+    @OneToOne(optional = false, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
     @JoinColumn(name = "user_id", unique = true, nullable = false)
     private User user;
-
-    @Column
-    private LocalDateTime updatedAt;
-
-    private boolean activo;
 
     // CONSTRUCTORS
 
     public Secretaria() {
-        this.activo = true;
     }
 
     public Secretaria(User user) {
@@ -35,14 +28,6 @@ public class Secretaria {
 
     // GETTERS & SETTERS
 
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
     public User getUser() {
         return user;
     }
@@ -51,28 +36,26 @@ public class Secretaria {
         this.user = user;
     }
 
-    public boolean isActivo() {
-        return activo;
+    // Teléfonos: la colección vive en User (User.telefonos); el perfil sólo delega.
+
+    public Set<Telefono> getTelefonos() {
+        return user == null ? Set.of() : user.getTelefonos();
     }
 
-    public void setActivo(boolean activo) {
-        this.activo = activo;
+    public void agregarTelefono(Telefono telefono) {
+        user.agregarTelefono(telefono);
     }
 
-    @PreUpdate
-    void update() {
-        this.updatedAt = LocalDateTime.now();
+    public void quitarTelefono(Telefono telefono) {
+        user.quitarTelefono(telefono);
     }
-
-    // toString para depuración
 
     @Override
     public String toString() {
         return "Secretaria{" +
-                "id=" + id +
+                "id=" + getId() +
                 ", user=" + user +
-                ", fecha de registro=" + this.user.getCreatedAt() +
-                ", activo=" + activo +
+                ", fecha de registro=" + (user != null ? user.getCreatedAt() : null) +
                 '}';
     }
 

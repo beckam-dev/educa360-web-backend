@@ -16,11 +16,11 @@
 - **Almacenamiento de Archivos:** Supabase Storage (Buckets para sustentos en PDF/imágenes y material de clase).
 - **Documentación API:** Swagger / OpenAPI 3 (springdoc-openapi).
 - **Gestor de Dependencias:** Maven.
-- **Arquitectura de Software:** Arquitectura en capas limpia:
+- **Arquitectura de Software:** Arquitectura en capa limpia:
   - `controllers`: Endpoints REST, validación DTO (`@Valid`).
   - `services`: Lógica de negocio transaccional (`@Transactional`).
   - `repositories`: Interfaces Spring Data JPA (`JpaRepository`).
-  - `entities`: Modelos JPA / Tablas relacionales.
+  - `entity`: Modelos JPA / Tablas relacionales. Todas las entidades extienden de `Auditable` (`id`, `createdAt`, `updatedAt`).
   - `dto`: Request/Response records o clases para desacoplar el modelo.
   - `security`: Filtros JWT, UserDetailsService, SecurityFilterChain.
   - `exceptions`: GlobalExceptionHandler (`@RestControllerAdvice`).
@@ -29,21 +29,27 @@
 
 ## 3. Roles del Sistema (RBAC)
 1. `ADMIN` (Coordinación / Dirección):
-   - Gestión integral de usuarios (alumnos, docentes, apoderados).
-   - Apertura y gestión de periodos lectivos (bimestres), cursos, aulas y asignación docente.
-   - Evaluación y resolución de tickets de justificación (Aprobar/Rechazar).
+   - Gestión de usuarios del personal (docentes, secretarias, otros administradores).
+   - Apertura y gestión de periodos lectivos (bimestres), cursos, materias, aulas y asignación docente.
+   - Definición del contenido institucional (materias, recursos, comunicados globales).
    - Acceso a reportes y métricas analíticas globales.
-2. `DOCENTE`:
+   - **No** gestiona tickets de justificación: esa responsabilidad está delegada a `SECRETARIA`.
+2. `SECRETARIA` (Personal administrativo):
+   - Evaluación y resolución de **tickets de justificación de inasistencia** (Aprobar / Rechazar).
+   - Registro de estudiantes: creación de ficha y gestión de su estado académico (`ACTIVO`, `TRASLADADO`, `RETIRADO`, `EGRESADO`).
+   - Gestión de matrículas y pensiones: cambio de estado a **`PAGADO`** (y los estados que defina el sistema).
+   - Soporte operativo del alumnado: consulta y actualización de los datos académicos del alumno.
+3. `DOCENTE`:
    - Registro de asistencia por sesión lectiva (Presente, Tardanza, Falta, Falta Justificada).
    - Registro y cálculo de calificaciones en escala vigesimal (0–20).
    - Publicación de recursos didácticos por sesión/semana.
    - Emisión de comunicados específicos para sus secciones o cursos.
-3. `ESTUDIANTE`:
+4. `ESTUDIANTE`:
    - Consulta de sus propias calificaciones y promedios en tiempo real.
    - Consulta de su historial de asistencias y faltas acumuladas.
    - Descarga de materiales de clase.
    - Visualización de comunicados dirigidos a su aula o generales.
-4. `APODERADO`:
+5. `APODERADO`:
    - Supervisión del rendimiento académico y notas vigesimales de su(s) hijo(s).
    - Visualización del registro diario de asistencia para detección temprana de ausentismo.
    - Creación y seguimiento de **Tickets de Justificación de Inasistencia** (adjuntando URL/comprobante de Supabase Storage).
@@ -53,25 +59,31 @@
 
 ## 4. Modelo de Dominio / Entidades Clave
 1. `User` / `Usuario`:
-   - `id`, `email` (único), `password` (hasheado con BCrypt), `nombres`, `apellidos`, `dni`, `rol` (Enum), `activo` (boolean), `createdAt`.
-2. `Docente`, `Estudiante`, `Apoderado`:
-   - Perfiles específicos vinculados 1:1 o heredados de `User`.
-   - Relación `Apoderado` 1:N `Estudiante` (o N:M para hermanos/familias).
+   - `id`, `email` (único y obligatorio), `password` (hasheado con BCrypt, **nunca** expuesto en respuestas JSON), `nombres`, `apellidos`, `dni` (único), `rol` (Enum: `ADMIN`, `SECRETARIA`, `DOCENTE`, `ESTUDIANTE`, `APODERADO`), `activo` (boolean, **única fuente de baja lógica del sistema**), `createdAt`, `updatedAt`.
+   - Los perfiles **no** duplican el estado de baja: se desactiva la cuenta, no el perfil.
+2. `Docente`, `Estudiante`, `Apoderado`, `Secretaria`:
+   - Perfiles específicos vinculados **1:1** a `User` (un usuario = un perfil).
+   - `Estudiante`: `fechaNacimiento`, `estado` (`ACTIVO`, `TRASLADADO`, `RETIRADO`, `EGRESADO`) y método `estaHabilitado()`.
+   - `Apoderado` ↔ `Estudiante`: asociación `ApoderadoEstudiante` (N:M con atributos: `parentesco`, `responsablePrincipal`, `activo`).
+   - `Telefono`: 1:N **desde `User`** (colección única para todos los perfiles). Lo usan `DOCENTE`, `SECRETARIA`, `APODERADO` y `ADMIN`; `ESTUDIANTE` no, porque al ser menor la comunicación se canaliza por su apoderado.
 3. `PeriodoAcademico`:
    - `id`, `nombre` (ej. Bimestre I, 2026), `fechaInicio`, `fechaFin`, `estado` (Abierto/Cerrado).
-4. `Curso` / `Asignatura`:
-   - `id`, `nombre`, `nivel` (Secundaria), `grado` (1ero a 5to).
+4. `Materia` (catálogo académico de la institución):
+   - `id`, `nombre` (único), `descripcion`, `activa`.
+   - Relación **N:M con `Docente`**: representa las **materias que un docente puede enseñar**.
+   - El `nivel`/`grado` no viven en la materia: se definen en `Seccion` / `Aula`.
 5. `Seccion` / `Aula`:
    - `id`, `grado`, `letra` (ej. A, B), `tutorId`, `periodoId`.
 6. `Matricula` / `AsignacionDocente`:
-   - Cruce entre estudiante/sección y docente/curso/sección.
+   - Cruce entre estudiante/sección y docente/materia/sección.
+   - **Limitación de alcance:** no se implementará un módulo completo de matrículas. La `Matricula` se modela como un registro con estados (ej. `PENDIENTE`, `PAGADO`) gestionados por `SECRETARIA` y actualizados por reglas automáticas del sistema.
 7. `Asistencia`:
    - `id`, `estudianteId`, `cursoId` o `seccionId`, `fecha`, `estado` (`PRESENTE`, `TARDANZA`, `FALTA`, `JUSTIFICADA`), `observacion`.
 8. `Calificacion`:
    - `id`, `estudianteId`, `cursoId`, `periodoId`, `criterio/competencia`, `nota` (0.0 a 20.0), `fechaRegistro`.
 9. `TicketJustificacion`:
    - `id`, `apoderadoId`, `estudianteId`, `fechaInasistencia`, `motivo`, `urlArchivoSustento`, `estado` (`PENDIENTE`, `APROBADO`, `RECHAZADO`), `fechaResolucion`, `observacionesAdmin`.
-   - **Regla de negocio:** Al aprobarse un ticket por el Admin, el registro de `Asistencia` correspondiente debe cambiar automáticamente a `JUSTIFICADA`.
+   - **Regla de negocio:** Al aprobarse un ticket por la `SECRETARIA`, el registro de `Asistencia` correspondiente debe cambiar automáticamente a `JUSTIFICADA`.
 10. `MaterialClase`:
     - `id`, `cursoId`, `seccionId`, `docenteId`, `titulo`, `urlArchivo`, `semana/bloque`, `fechaPublicacion`.
 11. `Comunicado`:
@@ -82,13 +94,18 @@
 ## 5. Módulos y Reglas de Negocio Esenciales
 - **Autenticación:**
   - Login por `POST /api/v1/auth/login` retornando JWT Bearer Token y los datos del perfil/rol.
-  - Validación de roles mediante `@PreAuthorize("hasRole('ADMIN')")`, `@PreAuthorize("hasRole('DOCENTE')")`, etc.
+  - Validación de roles mediante `@PreAuthorize("hasRole('ADMIN')")`, `@PreAuthorize("hasRole('SECRETARIA')")`, `@PreAuthorize("hasRole('DOCENTE')")`, etc.
 - **Flujo de Justificaciones:**
   - Solo el apoderado puede registrar solicitudes de justificación para sus representados.
-  - El Admin revisa el sustento; si lo aprueba, se actualiza el estado de la asistencia del estudiante de forma transaccional.
+  - La `SECRETARIA` revisa el sustento; si lo aprueba, se actualiza el estado de la asistencia del estudiante de forma transaccional.
+- **Matrículas, Pensiones y Estados:**
+  - El registro del estudiante y el cambio de estado de matrícula/pensión a `PAGADO` lo realiza `SECRETARIA`.
+  - El sistema aplica reglas automáticas (p. ej. al aprobar un ticket la asistencia pasa a `JUSTIFICADA`, cálculo de estados vencidos).
 - **Escala de Calificaciones:**
   - Estrictamente vigesimal: valores entre `0` y `20`.
 - **Acceso a Datos por Perfil:**
   - El estudiante solo puede consultar su propia información.
   - El apoderado solo puede consultar los datos de los estudiantes formalmente asignados a su cargo.
   - El docente solo puede calificar y tomar asistencia en los cursos y secciones que tenga formalmente asignados en el periodo vigente.
+  - La `SECRETARIA` solo gestiona tickets, registro/estados del alumnado y matrículas; la estructura académica (periodos, cursos, materias, aulas, asignaciones) es exclusiva de `ADMIN`.
+  - Al ser menores de edad, la comunicación con el `ESTUDIANTE` (citaciones, avisos de falta) se canaliza por su `APODERADO`: el estudiante no registra teléfonos propios.
