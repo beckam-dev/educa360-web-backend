@@ -17,13 +17,13 @@
 - **Documentación API:** Swagger / OpenAPI 3 (springdoc-openapi).
 - **Gestor de Dependencias:** Maven.
 - **Arquitectura de Software:** Arquitectura en capa limpia:
-  - `controllers`: Endpoints REST, validación DTO (`@Valid`).
-  - `services`: Lógica de negocio transaccional (`@Transactional`).
-  - `repositories`: Interfaces Spring Data JPA (`JpaRepository`).
+  - `controller`: Endpoints REST, validación DTO (`@Valid`).
+  - `service`: Lógica de negocio transaccional (`@Transactional`).
+  - `repository`: Interfaces Spring Data JPA (`JpaRepository`).
   - `entity`: Modelos JPA / Tablas relacionales. Todas las entidades extienden de `Auditable` (`id`, `createdAt`, `updatedAt`).
-  - `dto`: Request/Response records o clases para desacoplar el modelo.
-  - `security`: Filtros JWT, UserDetailsService, SecurityFilterChain.
-  - `exceptions`: GlobalExceptionHandler (`@RestControllerAdvice`).
+  - `dto`: Request/Response records para desacoplar el modelo y no exponer entidades.
+  - `security`: `SecurityConfig` (SecurityFilterChain), `JwtService`, `JwtAuthenticationFilter`, `AppUserDetailsService`.
+  - `exception`: `GlobalExceptionHandler` (`@RestControllerAdvice`) + `ApiError`.
 
 ---
 
@@ -93,8 +93,13 @@
 
 ## 5. Módulos y Reglas de Negocio Esenciales
 - **Autenticación:**
-  - Login por `POST /api/v1/auth/login` retornando JWT Bearer Token y los datos del perfil/rol.
+  - `POST /api/v1/auth/login` (`{email, password}`) → `200` con `{token, tokenType: "Bearer", expiresIn (segundos), user}`.
+  - `POST /api/v1/auth/register` → alta de cuenta. **Bootstrap:** si la BD no tiene ninguna cuenta, cualquiera puede crear la primera (`ADMIN` por defecto); a partir de ahí sólo un `ADMIN` autenticado puede crear cuentas.
+  - `GET /api/v1/auth/me` → perfil del usuario contenido en el token.
+  - El cliente envía `Authorization: Bearer <token>` en cada petición. API **stateless**: sin sesiones ni cookies.
+  - Errores en JSON (`ApiError`): `401` credenciales inválidas o token ausente, `403` usuario inactivo o sin permiso, `409` email/DNI duplicado, `400` validación de DTO con el detalle campo a campo.
   - Validación de roles mediante `@PreAuthorize("hasRole('ADMIN')")`, `@PreAuthorize("hasRole('SECRETARIA')")`, `@PreAuthorize("hasRole('DOCENTE')")`, etc.
+  - Endpoints de prueba de RBAC: `GET /api/v1/demo/{admin|secretaria|docente|estudiante|apoderado}` y `/api/v1/demo/authenticated`.
 - **Flujo de Justificaciones:**
   - Solo el apoderado puede registrar solicitudes de justificación para sus representados.
   - La `SECRETARIA` revisa el sustento; si lo aprueba, se actualiza el estado de la asistencia del estudiante de forma transaccional.
