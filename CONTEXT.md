@@ -10,9 +10,9 @@
 
 ## 2. Stack Tecnológico Backend
 - **Lenguaje:** Java 25.
-- **Framework:** Spring Boot (Spring Web, Spring Security, Spring Data JPA).
+- **Framework:** Spring Boot **4.1.1** (Spring WebMVC, Spring Security, Spring Data JPA).
 - **Autenticación y Autorización:** Stateless con JWT (JSON Web Tokens) y RBAC (Control de acceso basado en roles).
-- **Base de Datos:** PostgreSQL (alojada en Supabase / Cloud).
+- **Base de Datos:** **PostgreSQL 17** — en desarrollo corre en Docker (`docker-compose.yml`); en producción se apunta a Supabase.
 - **Almacenamiento de Archivos:** Supabase Storage (Buckets para sustentos en PDF/imágenes y material de clase).
 - **Documentación API:** Swagger / OpenAPI 3 (springdoc-openapi).
 - **Gestor de Dependencias:** Maven.
@@ -22,8 +22,11 @@
   - `repository`: Interfaces Spring Data JPA (`JpaRepository`).
   - `entity`: Modelos JPA / Tablas relacionales. Todas las entidades extienden de `Auditable` (`id`, `createdAt`, `updatedAt`).
   - `dto`: Request/Response records para desacoplar el modelo y no exponer entidades.
-  - `security`: `SecurityConfig` (SecurityFilterChain), `JwtService`, `JwtAuthenticationFilter`, `AppUserDetailsService`.
-  - `exception`: `GlobalExceptionHandler` (`@RestControllerAdvice`) + `ApiError`.
+  - `security`: `SecurityConfig` (SecurityFilterChain + CORS), `JwtService`, `JwtAuthenticationFilter`, `AppUserDetailsService`.
+  - `service`: `AuthService` (login, registro, `/me`) y `LoginAttemptService` (límite de intentos de login).
+  - `exception`: `GlobalExceptionHandler` (`@RestControllerAdvice`), `ApiError`, `ConflictException` (409) y `RateLimitedException` (429).
+- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 29 tests, ejecutados por el CI (GitHub Actions) en cada push.
+- **Entorno:** Docker Compose (`docker compose up -d` → Postgres + backend). Los secretos viven en `.env` (no versionado; su plantilla vacía es `.env.example`) y el backend **no arranca** sin `APP_JWT_SECRET`. Postgres sólo escucha en `127.0.0.1`.
 
 ---
 
@@ -58,36 +61,65 @@
 ---
 
 ## 4. Modelo de Dominio / Entidades Clave
-1. `User` / `Usuario`:
+
+> **Estado:** ✅ = ya implementada en `entity/` · 📋 = diseñada aquí, pendiente de implementar.
+
+1. ✅ `User` / `Usuario`:
    - `id`, `email` (único y obligatorio), `password` (hasheado con BCrypt, **nunca** expuesto en respuestas JSON), `nombres`, `apellidos`, `dni` (único), `rol` (Enum: `ADMIN`, `SECRETARIA`, `DOCENTE`, `ESTUDIANTE`, `APODERADO`), `activo` (boolean, **única fuente de baja lógica del sistema**), `createdAt`, `updatedAt`.
    - Los perfiles **no** duplican el estado de baja: se desactiva la cuenta, no el perfil.
-2. `Docente`, `Estudiante`, `Apoderado`, `Secretaria`:
+2. ✅ `Docente`, `Estudiante`, `Apoderado`, `Secretaria`:
    - Perfiles específicos vinculados **1:1** a `User` (un usuario = un perfil).
    - `Estudiante`: `fechaNacimiento`, `estado` (`ACTIVO`, `TRASLADADO`, `RETIRADO`, `EGRESADO`) y método `estaHabilitado()`.
    - `Apoderado` ↔ `Estudiante`: asociación `ApoderadoEstudiante` (N:M con atributos: `parentesco`, `responsablePrincipal`, `activo`).
    - `Telefono`: 1:N **desde `User`** (colección única para todos los perfiles). Lo usan `DOCENTE`, `SECRETARIA`, `APODERADO` y `ADMIN`; `ESTUDIANTE` no, porque al ser menor la comunicación se canaliza por su apoderado.
-3. `PeriodoAcademico`:
+3. 📋 `PeriodoAcademico`:
    - `id`, `nombre` (ej. Bimestre I, 2026), `fechaInicio`, `fechaFin`, `estado` (Abierto/Cerrado).
-4. `Materia` (catálogo académico de la institución):
+4. ✅ `Materia` (catálogo académico de la institución):
    - `id`, `nombre` (único), `descripcion`, `activa`.
    - Relación **N:M con `Docente`**: representa las **materias que un docente puede enseñar**.
    - El `nivel`/`grado` no viven en la materia: se definen en `Seccion` / `Aula`.
-5. `Seccion` / `Aula`:
+5. 📋 `Seccion` / `Aula`:
    - `id`, `grado`, `letra` (ej. A, B), `tutorId`, `periodoId`.
-6. `Matricula` / `AsignacionDocente`:
+6. 📋 `Matricula` / `AsignacionDocente`:
    - Cruce entre estudiante/sección y docente/materia/sección.
    - **Limitación de alcance:** no se implementará un módulo completo de matrículas. La `Matricula` se modela como un registro con estados (ej. `PENDIENTE`, `PAGADO`) gestionados por `SECRETARIA` y actualizados por reglas automáticas del sistema.
-7. `Asistencia`:
+7. 📋 `Asistencia`:
    - `id`, `estudianteId`, `cursoId` o `seccionId`, `fecha`, `estado` (`PRESENTE`, `TARDANZA`, `FALTA`, `JUSTIFICADA`), `observacion`.
-8. `Calificacion`:
+8. 📋 `Calificacion`:
    - `id`, `estudianteId`, `cursoId`, `periodoId`, `criterio/competencia`, `nota` (0.0 a 20.0), `fechaRegistro`.
-9. `TicketJustificacion`:
+9. 📋 `TicketJustificacion`:
    - `id`, `apoderadoId`, `estudianteId`, `fechaInasistencia`, `motivo`, `urlArchivoSustento`, `estado` (`PENDIENTE`, `APROBADO`, `RECHAZADO`), `fechaResolucion`, `observacionesAdmin`.
    - **Regla de negocio:** Al aprobarse un ticket por la `SECRETARIA`, el registro de `Asistencia` correspondiente debe cambiar automáticamente a `JUSTIFICADA`.
-10. `MaterialClase`:
+10. 📋 `MaterialClase`:
     - `id`, `cursoId`, `seccionId`, `docenteId`, `titulo`, `urlArchivo`, `semana/bloque`, `fechaPublicacion`.
-11. `Comunicado`:
+11. 📋 `Comunicado`:
     - `id`, `autorId`, `titulo`, `contenido`, `alcance` (`GLOBAL`, `GRADO`, `SECCION`), `destinatarioSeccionId` (nullable), `fechaPublicacion`.
+
+---
+
+## 6. Estado de la Implementación
+
+**Hecho y probado:**
+- Autenticación y autorización: login JWT, registro con alta inicial, `/me`, RBAC por rol, límite de intentos, errores uniformes en JSON y CORS para el SPA.
+- 9 entidades: `Auditable`, `User`, `Docente`, `Estudiante`, `Apoderado`, `Secretaria`, `Materia`, `Telefono`, `ApoderadoEstudiante`.
+- 29 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
+- Docker Compose (Postgres + backend) con secretos fuera de Git y `.env.example` para el equipo.
+- Documentación interactiva en Swagger: `http://localhost:8080/swagger-ui/index.html`.
+
+**Pendiente (por módulo):**
+- Gestión de usuarios y perfiles (CRUD de `ADMIN`); deberá garantizarse la consistencia perfil ↔ rol.
+- Catálogo académico: periodos, secciones/aulas, asignación docente.
+- Asistencia diaria y calificaciones vigesimales.
+- Tickets de justificación (apoderado → secretaria) y su efecto automático sobre la asistencia.
+- Materiales de clase y comunicados.
+- Archivos en Supabase Storage (sustentos y material didáctico).
+- Endurecimiento, antes de producción: Flyway + perfil `dev`, refresh tokens, Docker non-root, CI en `main`.
+
+**Cómo se ejecuta:**
+- `docker compose up -d` → Postgres (sólo accesible en `127.0.0.1`) + backend en `http://localhost:8080`.
+- `./mvnw spring-boot:run` → desarrollo con recarga; usa el mismo Postgres de Docker.
+- `./mvnw test` → 29 tests contra una PostgreSQL efímera (requiere Docker; sin él se saltan).
+- Alta inicial: la primera cuenta se crea con `POST /api/v1/auth/register` y queda como `ADMIN`.
 
 ---
 
