@@ -25,7 +25,7 @@
   - `security`: `SecurityConfig` (SecurityFilterChain + CORS), `JwtService`, `JwtAuthenticationFilter`, `AppUserDetailsService`.
   - `service`: `AuthService` (login, registro, `/me`) y `LoginAttemptService` (límite de intentos de login).
   - `exception`: `GlobalExceptionHandler` (`@RestControllerAdvice`), `ApiError`, `ConflictException` (409) y `RateLimitedException` (429).
-- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 29 tests, ejecutados por el CI (GitHub Actions) en cada push.
+- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 39 tests, ejecutados por el CI (GitHub Actions) en cada push.
 - **Entorno:** Docker Compose (`docker compose up -d` → Postgres + backend). Los secretos viven en `.env` (no versionado; su plantilla vacía es `.env.example`) y el backend **no arranca** sin `APP_JWT_SECRET`. Postgres sólo escucha en `127.0.0.1`.
 
 ---
@@ -101,13 +101,14 @@
 
 **Hecho y probado:**
 - Autenticación y autorización: login JWT, registro con alta inicial, `/me`, RBAC por rol, límite de intentos, errores uniformes en JSON y CORS para el SPA.
+- Gestión de usuarios y perfiles (`/api/v1/admin/usuarios`): alta con creación automática del perfil según el rol, listado con filtros, edición, baja lógica y reseteo de contraseña.
 - 9 entidades: `Auditable`, `User`, `Docente`, `Estudiante`, `Apoderado`, `Secretaria`, `Materia`, `Telefono`, `ApoderadoEstudiante`.
-- 29 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
+- 39 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
 - Docker Compose (Postgres + backend) con secretos fuera de Git y `.env.example` para el equipo.
 - Documentación interactiva en Swagger: `http://localhost:8080/swagger-ui/index.html`.
 
 **Pendiente (por módulo):**
-- Gestión de usuarios y perfiles (CRUD de `ADMIN`); deberá garantizarse la consistencia perfil ↔ rol.
+- Asignación de materias a docentes y de representados a apoderados (ambas dependen del catálogo académico).
 - Catálogo académico: periodos, secciones/aulas, asignación docente.
 - Asistencia diaria y calificaciones vigesimales.
 - Tickets de justificación (apoderado → secretaria) y su efecto automático sobre la asistencia.
@@ -134,6 +135,14 @@
   - `AppCORS`: orígenes del SPA por propiedad `app.cors.allowed-origins` (sin credenciales: la auth va en el header).
   - Validación de roles mediante `@PreAuthorize("hasRole('ADMIN')")`, `@PreAuthorize("hasRole('SECRETARIA')")`, `@PreAuthorize("hasRole('DOCENTE')")`, etc.
   - Endpoints de prueba de RBAC: `GET /api/v1/demo/{admin|secretaria|docente|estudiante|apoderado}` y `/api/v1/demo/authenticated`.
+- **Gestión de usuarios y perfiles (exclusivo de `ADMIN`):**
+  - `GET /api/v1/admin/usuarios?rol=&activo=&q=` → listado con filtros combinables; `q` busca por email, nombres, apellidos o DNI.
+  - `GET /api/v1/admin/usuarios/{id}` → detalle (`404` si no existe).
+  - `POST /api/v1/admin/usuarios` → crea la cuenta **y su perfil automáticamente según el rol** (consistencia perfil ↔ rol garantizada: no puede existir un `User` cuyo rol no corresponda a su perfil). `ESTUDIANTE` exige `fechaNacimiento` y **no admite teléfonos** (`400`: la comunicación es con su apoderado); `DOCENTE` admite `titulo`. Email/DNI duplicados → `409`.
+  - `PUT /api/v1/admin/usuarios/{id}` → nombres, apellidos, teléfonos (lista vacía = quitar todos) y campos del perfil. **El rol no es editable**: para cambiarlo se da de baja la cuenta y se crea otra.
+  - `PATCH /api/v1/admin/usuarios/{id}/activo` → baja lógica (`{activo: false}`), que corta el acceso al instante.
+  - `PATCH /api/v1/admin/usuarios/{id}/password` → reseteo por `ADMIN` (no invalida los tokens ya emitidos; eso lo hace la baja).
+  - Todo con `@PreAuthorize("hasRole('ADMIN')")`: sin token `401`, con otro rol `403`.
 - **Flujo de Justificaciones:**
   - Solo el apoderado puede registrar solicitudes de justificación para sus representados.
   - La `SECRETARIA` revisa el sustento; si lo aprueba, se actualiza el estado de la asistencia del estudiante de forma transaccional.
