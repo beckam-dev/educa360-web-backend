@@ -74,6 +74,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request, null);
     }
 
+    // 429: límite de intentos de login (anti fuerza bruta), con Retry-After
+    @ExceptionHandler(RateLimitedException.class)
+    public ResponseEntity<Object> handleRateLimited(RateLimitedException ex, HttpServletRequest request) {
+        long segundos = Math.max(1, ex.getReintentarEn().getSeconds());
+        ApiError body = ApiError.of(429, "Too Many Requests",
+                "Demasiados intentos fallidos. Vuelve a intentarlo en " + legible(segundos),
+                request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(segundos))
+                .body(body);
+    }
+
     // 409: violación de constraints de la BD (red de seguridad).
     // Se identifica el constraint por la columna del DETAIL de Postgres
     // ("Key (email)=(...) already exists") sin filtrar el SQL al cliente.
@@ -158,6 +170,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private String reason(HttpStatusCode statusCode) {
         return HttpStatus.valueOf(statusCode.value()).getReasonPhrase();
+    }
+
+    /** "900 s" -> "15 minutos" (para humanos, en el mensaje del 429). */
+    private String legible(long segundos) {
+        if (segundos < 60) {
+            return segundos + " segundos";
+        }
+        long minutos = (segundos + 59) / 60;
+        return minutos + (minutos == 1 ? " minuto" : " minutos");
     }
 
     private String path(HttpServletRequest request) {

@@ -6,12 +6,14 @@ import com.educa360.backend.dto.RegisterRequest;
 import com.educa360.backend.dto.UserResponse;
 import com.educa360.backend.entity.User;
 import com.educa360.backend.exception.ConflictException;
+import com.educa360.backend.exception.RateLimitedException;
 import com.educa360.backend.repository.UserRepository;
 import com.educa360.backend.security.JwtService;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -27,32 +29,52 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final LoginAttemptService loginAttempts;
 
     public AuthService(
             UserRepository userRepository,
             AuthenticationManager authenticationManager,
             PasswordEncoder passwordEncoder,
-            JwtService jwtService
+            JwtService jwtService,
+            LoginAttemptService loginAttempts
     ) {
         this.userRepository = userRepository;
         this.authenticationManager = authenticationManager;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.loginAttempts = loginAttempts;
     }
 
     /**
      * Login: valida credenciales (y que la cuenta esté activa) y firma un JWT.
      * Spring Security lanza BadCredentialsException / DisabledException,
      * que GlobalExceptionHandler traduce a 401 / 403.
+     *
+     * El límite de intentos (5 fallos en 15 min -> 15 min de bloqueo) se
+     * comprueba ANTES de validar la contraseña: si no, el atacante seguiría
+     * consumiendo bcrypt y CPU durante el bloqueo.
+     *
+     * @param ip IP del cliente; forma parte de la clave del límite de intentos
+     *           para no permitir que alguien bloquee a la víctima a propósito.
      */
     @Transactional(readOnly = true)
-    public AuthResponse login(LoginRequest request) {
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.email(), request.password()));
+    public AuthResponse login(LoginRequest request, String ip) {
+        if (loginAttempts.estaBloqueado(request.email(), ip)) {
+            throw new RateLimitedException(loginAttempts.restante(request.email(), ip));
+        }
+
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.email(), request.password()));
+        } catch (AuthenticationException fallo) {
+            loginAttempts.registrarFallo(request.email(), ip);
+            throw fallo;
+        }
 
         User user = userRepository.findByEmail(request.email())
                 .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
 
+        loginAttempts.registrarExito(request.email(), ip);
         return buildAuthResponse(user);
     }
 

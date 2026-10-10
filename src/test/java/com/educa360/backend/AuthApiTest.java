@@ -1,6 +1,7 @@
 package com.educa360.backend;
 
 import com.educa360.backend.repository.UserRepository;
+import com.educa360.backend.service.LoginAttemptService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -57,9 +58,13 @@ class AuthApiTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private LoginAttemptService loginAttempts;
+
     @BeforeEach
     void empezarDeCero() {
         userRepository.deleteAll(); // cada test ve una BD vacía (alta inicial posible)
+        loginAttempts.limpiar();    // y sin intentos fallidos acumulados
     }
 
     // ==================== Autenticación ====================
@@ -218,6 +223,47 @@ class AuthApiTest {
 
         assertEquals(403, login.getResponse().getStatus());
         assertTrue(login.getResponse().getContentAsString().contains("inactivo"));
+    }
+
+    @Test
+    @DisplayName("Tras 5 fallos el login se bloquea: 429 con Retry-After")
+    void fuerzaBrutaBloqueaCon429() throws Exception {
+        registrar("segura@educa360.pe", "Secreta1234", "44445555", "SECRETARIA", null);
+
+        for (int i = 1; i <= 5; i++) {
+            MvcResult fallo = enviarPost("/api/v1/auth/login",
+                    loginBody("segura@educa360.pe", "mala-" + i), null);
+            assertEquals(401, fallo.getResponse().getStatus(), "intento " + i);
+        }
+
+        // El 6.º intento, incluso con la contraseña CORRECTA, sigue bloqueado
+        MvcResult bloqueado = enviarPost("/api/v1/auth/login",
+                loginBody("segura@educa360.pe", "Secreta1234"), null);
+
+        assertEquals(429, bloqueado.getResponse().getStatus());
+        assertNotNull(bloqueado.getResponse().getHeader("Retry-After"),
+                "debe indicar cuándo volver a intentar");
+        assertTrue(bloqueado.getResponse().getContentAsString().contains("429"));
+    }
+
+    @Test
+    @DisplayName("Un login correcto reinicia el contador de intentos")
+    void aciertoReiniciaElContador() throws Exception {
+        registrar("buena@educa360.pe", "Buena12345", "66667777", "DOCENTE", null);
+
+        for (int i = 1; i <= 4; i++) {
+            enviarPost("/api/v1/auth/login", loginBody("buena@educa360.pe", "mala-" + i), null);
+        }
+        // Acierto: limpia los 4 fallos anteriores
+        assertEquals(200, enviarPost("/api/v1/auth/login",
+                loginBody("buena@educa360.pe", "Buena12345"), null).getResponse().getStatus());
+
+        // Otros 4 fallos: con el contador limpio no debe bloquear
+        for (int i = 1; i <= 4; i++) {
+            assertEquals(401, enviarPost("/api/v1/auth/login",
+                    loginBody("buena@educa360.pe", "mala-" + i), null).getResponse().getStatus(),
+                    "intento " + i + " tras el acierto");
+        }
     }
 
     // ==================== RBAC ====================

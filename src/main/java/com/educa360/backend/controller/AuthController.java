@@ -5,6 +5,7 @@ import com.educa360.backend.dto.LoginRequest;
 import com.educa360.backend.dto.RegisterRequest;
 import com.educa360.backend.dto.UserResponse;
 import com.educa360.backend.service.AuthService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,10 +26,18 @@ public class AuthController {
         this.authService = authService;
     }
 
-    /** POST /api/v1/auth/login -> JWT + perfil */
+    /**
+     * POST /api/v1/auth/login -> JWT + perfil
+     *
+     * La IP acompaña al email en el límite de intentos fallidos.
+     * getRemoteAddr() es la IP real salvo que haya un proxy delante: en ese
+     * caso activar server.forward-headers-strategy=framework (leer el
+     * X-Forwarded-For a mano sería manipulable por el cliente).
+     */
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok(authService.login(request));
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request,
+                                              HttpServletRequest httpRequest) {
+        return ResponseEntity.ok(authService.login(request, httpRequest.getRemoteAddr()));
     }
 
     /** POST /api/v1/auth/register -> pública sólo hasta crear la primera cuenta */
