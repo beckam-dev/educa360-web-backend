@@ -5,6 +5,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: educa360-backend
+    # Vuelve a levantar solo tras un reinicio del equipo o un `docker compose down`
+    restart: unless-stopped
     ports:
       - "${BACKEND_PORT}:8080"
     environment:
@@ -15,6 +17,10 @@ services:
       # de caer en el secreto de desarrollo de application.properties.
       APP_JWT_SECRET: ${APP_JWT_SECRET:?Define APP_JWT_SECRET en .env (mínimo 32 bytes)}
       APP_JWT_EXPIRATION_MS: ${APP_JWT_EXPIRATION_MS:-86400000}
+      # CANTIDAD DE INTENTOS POR LOGIN (anti fuerza bruta)
+      APP_SECURITY_LOGIN_MAX_ATTEMPTS: ${APP_SECURITY_LOGIN_MAX_ATTEMPTS:-5}
+      APP_SECURITY_LOGIN_WINDOW_MINUTES: ${APP_SECURITY_LOGIN_WINDOW_MINUTES:-15}
+      APP_SECURITY_LOGIN_COOLDOWN_MINUTES: ${APP_SECURITY_LOGIN_COOLDOWN_MINUTES:-15}
     depends_on:
       postgres:
         condition: service_healthy
@@ -22,12 +28,16 @@ services:
   postgres:
     image: postgres:17
     container_name: educa360-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # 127.0.0.1 delante del puerto: Postgres SÓLO se escucha desde esta máquina.
+    # Sin ese prefijo se publicaría en todas las interfaces y, con una contraseña
+    # débil, cualquiera en la red podría conectarse.
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
