@@ -11,4 +11,7 @@ import java.util.Optional;
 public interface DocenteRepository extends JpaRepository<Docente, Long> {
 
     Optional<Docente> findByUser(User user);
+
+    /** ¿El docente tiene habilitada esa materia? (join table docente_materia) */
+    boolean existsByIdAndMaterias_Id(Long docenteId, Long materiaId);
 }

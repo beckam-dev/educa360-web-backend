@@ -25,7 +25,7 @@
   - `security`: `SecurityConfig` (SecurityFilterChain + CORS), `JwtService`, `JwtAuthenticationFilter`, `AppUserDetailsService`.
   - `service`: `AuthService` (login, registro, `/me`) y `LoginAttemptService` (límite de intentos de login).
   - `exception`: `GlobalExceptionHandler` (`@RestControllerAdvice`), `ApiError`, `ConflictException` (409) y `RateLimitedException` (429).
-- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 42 tests, ejecutados por el CI (GitHub Actions) en cada push.
+- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 57 tests, ejecutados por el CI (GitHub Actions) en cada push.
 - **Entorno:** Docker Compose (`docker compose up -d` → Postgres + backend). Los secretos viven en `.env` (no versionado; su plantilla vacía es `.env.example`) y el backend **no arranca** sin `APP_JWT_SECRET`. Postgres sólo escucha en `127.0.0.1`.
 
 ---
@@ -72,26 +72,30 @@
    - `Estudiante`: `fechaNacimiento`, `estado` (`ACTIVO`, `TRASLADADO`, `RETIRADO`, `EGRESADO`) y método `estaHabilitado()`.
    - `Apoderado` ↔ `Estudiante`: asociación `ApoderadoEstudiante` (N:M con atributos: `parentesco`, `responsablePrincipal`, `activo`).
    - `Telefono`: 1:N **desde `User`** (colección única para todos los perfiles). Lo usan `DOCENTE`, `SECRETARIA`, `APODERADO` y `ADMIN`; `ESTUDIANTE` no, porque al ser menor la comunicación se canaliza por su apoderado.
-3. 📋 `PeriodoAcademico`:
-   - `id`, `nombre` (ej. Bimestre I, 2026), `fechaInicio`, `fechaFin`, `estado` (Abierto/Cerrado).
+3. ✅ `PeriodoAcademico`:
+   - `id`, `nombre` (único; ej. Bimestre I, 2026), `fechaInicio`, `fechaFin`, `estado` (`ABIERTO`/`CERRADO`).
+   - **Regla:** sólo puede haber UNO `ABIERTO` a la vez — es el período vigente al que apuntarán asistencia y calificaciones. Nace `CERRADO` y se abre con `PATCH /admin/periodos/{id}/estado`; abrir con otro vigente → `409`.
 4. ✅ `Materia` (catálogo académico de la institución):
    - `id`, `nombre` (único), `descripcion`, `activa`.
-   - Relación **N:M con `Docente`**: representa las **materias que un docente puede enseñar**.
-   - El `nivel`/`grado` no viven en la materia: se definen en `Seccion` / `Aula`.
-5. 📋 `Seccion` / `Aula`:
-   - `id`, `grado`, `letra` (ej. A, B), `tutorId`, `periodoId`.
-6. 📋 `Matricula` / `AsignacionDocente`:
-   - Cruce entre estudiante/sección y docente/materia/sección.
+   - Relación **N:M con `Docente`**: las **materias que un docente puede enseñar** (habilitaciones, con endpoints en `/admin/docentes/{id}/materias`).
+   - `activa=false` **impide nuevas asignaciones docentes**; las existentes se conservan (es un archivado, no un borrado).
+   - El `nivel`/`grado` no viven en la materia: se definen en `Seccion`.
+5. ✅ `Seccion`:
+   - `id`, `grado` (acotado a **1..5**: el sistema es sólo secundaria, sin campo `nivel`), `letra` (mayúscula), `aula` (texto libre, p. ej. "A-101" — **sin entidad `Aula`**; se extraerá como tabla si aparecen capacidad u horarios), `tutorId` (docente opcional), `periodoId`.
+   - **Regla:** `grado+letra` es único DENTRO de un período — las secciones se re-forman cada período (así asistencia y matrícula quedan acotadas al período sin columnas extra).
+6. ✅ `AsignacionDocente` / 📋 `Matricula`:
+   - `AsignacionDocente`: cruce docente × materia × sección (el período viene en la sección). **No existe entidad `Curso`: la asignación ES "el curso" del colegio** (Matemática · 3°A · profe X) — un `Curso` aparte sería un intermediario sin comportamiento. Única por (materia, sección); exige materia habilitada al docente y materia activa.
    - **Limitación de alcance:** no se implementará un módulo completo de matrículas. La `Matricula` se modela como un registro con estados (ej. `PENDIENTE`, `PAGADO`) gestionados por `SECRETARIA` y actualizados por reglas automáticas del sistema.
 7. 📋 `Asistencia`:
-   - `id`, `estudianteId`, `cursoId` o `seccionId`, `fecha`, `estado` (`PRESENTE`, `TARDANZA`, `FALTA`, `JUSTIFICADA`), `observacion`.
+   - `id`, `estudianteId`, `seccionId`, `fecha`, `estado` (`PRESENTE`, `TARDANZA`, `FALTA`, `JUSTIFICADA`), `observacion`.
+   - La asistencia diaria la toma el tutor por sección; el modo "por bloque" llegará con el horario (diferido).
 8. 📋 `Calificacion`:
-   - `id`, `estudianteId`, `cursoId`, `periodoId`, `criterio/competencia`, `nota` (0.0 a 20.0), `fechaRegistro`.
+   - `id`, `estudianteId`, `asignacionId` (materia + sección, y el período viene en la sección), `criterio/competencia`, `nota` (0.0 a 20.0), `fechaRegistro`.
 9. 📋 `TicketJustificacion`:
    - `id`, `apoderadoId`, `estudianteId`, `fechaInasistencia`, `motivo`, `urlArchivoSustento`, `estado` (`PENDIENTE`, `APROBADO`, `RECHAZADO`), `fechaResolucion`, `observacionesAdmin`.
    - **Regla de negocio:** Al aprobarse un ticket por la `SECRETARIA`, el registro de `Asistencia` correspondiente debe cambiar automáticamente a `JUSTIFICADA`.
 10. 📋 `MaterialClase`:
-    - `id`, `cursoId`, `seccionId`, `docenteId`, `titulo`, `urlArchivo`, `semana/bloque`, `fechaPublicacion`.
+    - `id`, `asignacionId`, `docenteId`, `titulo`, `urlArchivo`, `semana/bloque`, `fechaPublicacion`.
 11. 📋 `Comunicado`:
     - `id`, `autorId`, `titulo`, `contenido`, `alcance` (`GLOBAL`, `GRADO`, `SECCION`), `destinatarioSeccionId` (nullable), `fechaPublicacion`.
 
@@ -102,14 +106,14 @@
 **Hecho y probado:**
 - Autenticación y autorización: login JWT, registro con alta inicial, `/me`, RBAC por rol, límite de intentos, errores uniformes en JSON y CORS para el SPA.
 - Gestión de usuarios y perfiles: altas por rol con cuenta y perfil creados en la misma transacción, en dos zonas — personal (`/api/v1/admin/{usuarios,docentes,secretarias}`, sólo `ADMIN`) y alumnos/familias (`/api/v1/secretaria/{estudiantes,apoderados}`, `ADMIN` + `SECRETARIA`). Listado con filtros, edición, baja lógica y reseteo de contraseña en `/api/v1/admin/usuarios`. `/auth/register` queda reducido al arranque (sólo con BD vacía): un solo camino de creación, sin duplicidades.
-- 9 entidades: `Auditable`, `User`, `Docente`, `Estudiante`, `Apoderado`, `Secretaria`, `Materia`, `Telefono`, `ApoderadoEstudiante`.
-- 42 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
+- Catálogo académico (Módulo 2, todo `ADMIN`): períodos (**sólo uno `ABIERTO` a la vez**, nacen `CERRADOS`), materias del catálogo (CRUD + archivar con `activa`), secciones por período (grado 1..5, `grado+letra` único por período, tutor opcional), **habilitaciones** de materia por docente (`GET|PUT /admin/docentes/{id}/materias`, el `PUT` reemplaza el conjunto) y **asignaciones docentes** (únicas por materia+sección, exigen habilitación y materia activa; baja física con `DELETE`).
+- 12 entidades: `Auditable`, `User`, `Docente`, `Estudiante`, `Apoderado`, `Secretaria`, `Materia`, `Telefono`, `ApoderadoEstudiante`, `PeriodoAcademico`, `Seccion`, `AsignacionDocente`.
+- 57 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
 - Docker Compose (Postgres + backend) con secretos fuera de Git y `.env.example` para el equipo.
 - Documentación interactiva en Swagger: `http://localhost:8080/swagger-ui/index.html`.
 
 **Pendiente (por módulo):**
-- Asignación de materias a docentes y de representados a apoderados (ambas dependen del catálogo académico).
-- Catálogo académico: periodos, secciones/aulas, asignación docente.
+- Representados de apoderados (`ApoderadoEstudiante`): vendrá con el módulo de matrículas.
 - Estudiantes y matrículas (`SECRETARIA`): su listado `GET /api/v1/secretaria/estudiantes` y los estados de matrícula. **Ahí nacerá `EstudianteResponse`** (con sección, matrícula y apoderado), junto con la edición acotada de la ficha del alumno; no antes, y sin reutilizar `UsuarioResponse` para ese listado — es la vista de cuentas de ADMIN, no la de alumnos de Secretaría.
 - Asistencia diaria y calificaciones vigesimales.
 - Tickets de justificación (apoderado → secretaria) y su efecto automático sobre la asistencia.
@@ -120,7 +124,7 @@
 **Cómo se ejecuta:**
 - `docker compose up -d` → Postgres (sólo accesible en `127.0.0.1`) + backend en `http://localhost:8080`.
 - `./mvnw spring-boot:run` → desarrollo con recarga; usa el mismo Postgres de Docker.
-- `./mvnw test` → 42 tests contra una PostgreSQL efímera (requiere Docker; sin él se saltan).
+- `./mvnw test` → 57 tests contra una PostgreSQL efímera (requiere Docker; sin él se saltan).
 - Alta inicial: la primera cuenta se crea con `POST /api/v1/auth/register` (sólo con BD vacía) y queda como `ADMIN`; en cuanto hay una, ese endpoint se cierra y todo lo demás se gestiona en `/api/v1/admin/...`.
 
 ---
@@ -152,6 +156,14 @@
   - `PATCH /api/v1/admin/usuarios/{id}/activo` → baja lógica (`{activo: false}`), que corta el acceso al instante.
   - `PATCH /api/v1/admin/usuarios/{id}/password` → reseteo por `ADMIN` (no invalida los tokens ya emitidos; eso lo hace la baja).
   - Sin token `401`; sin permiso para la zona `403`.
+- **Catálogo académico (Módulo 2, exclusivo de `ADMIN`, todo bajo `/api/v1/admin/...`):**
+  - **Terminología:** `Materia` = "lo que se enseña" (catálogo: Matemática, Física); `Seccion` = el grupo de un período ("3°A"); `AsignacionDocente` = **"el curso"** del colegio (materia · sección · docente). **No existe entidad `Curso`**: sería un intermediario sin comportamiento propio — donde el roadmap decía `cursoId` ahora se usa `asignacionId` o `seccionId`.
+  - `GET|POST /api/v1/admin/periodos`, `PUT /{id}`, `PATCH /{id}/estado`: el período **nace `CERRADO`** y se abre a propósito (así "quién abrió y cuándo" queda claro y la regla vive en un solo método). **Sólo UNO `ABIERTO` a la vez** (`409` si ya hay otro vigente), nombre único (`409`), fin anterior a inicio (`400`).
+  - `GET|POST /api/v1/admin/materias`, `PUT /{id}`, `PATCH /{id}/activa`: nombre único (`409`). `activa=false` **impide nuevas asignaciones** sin tocar las existentes — es un "ya no la damos más", no un borrado.
+  - `GET|POST /api/v1/admin/secciones` (`?periodoId=`), `PUT /{id}`: grado acotado a **1..5** (sólo secundaria, sin campo `nivel`), letra en mayúscula, `aula` como **texto** (sin entidad `Aula`: se extraerá si aparecen capacidad u horarios), tutor opcional. `grado+letra` único por período (`409`) y **no se mueve de período** (`409`: se crea otra fila — arrastrarla rompería el histórico por período).
+  - `GET|PUT /api/v1/admin/docentes/{id}/materias`: las **habilitaciones** del docente ("qué puede enseñar"). El `PUT` **reemplaza el conjunto completo** (misma filosofía que los teléfonos): se envía la lista entera — o vacía para dejarlo sin materias.
+  - `GET|POST /api/v1/admin/asignaciones` (`?seccionId=`, `?docenteId=`), `DELETE /{id}`: el período **no se pide** (viene de la sección). Reglas → `409`: única por (materia, sección) — nadie más da Matemáticas en 3°A —, docente sin la materia habilitada y materia desactivada. La baja es **física** (`DELETE`): es configuración del período, no histórico de personas (eso sí se desactiva, como `User.activo`).
+  - **Diferidos, con su disparador escrito:** horario (cuando la asistencia sea "por bloque" — la diaria la toma el tutor por sección), `Unidad`/contenidos (cuando las notas se agrupen por unidad) y `Aula` como entidad (si aparecen capacidad u horarios).
 - **Flujo de Justificaciones:**
   - Solo el apoderado puede registrar solicitudes de justificación para sus representados.
   - La `SECRETARIA` revisa el sustento; si lo aprueba, se actualiza el estado de la asistencia del estudiante de forma transaccional.
@@ -164,5 +176,5 @@
   - El estudiante solo puede consultar su propia información.
   - El apoderado solo puede consultar los datos de los estudiantes formalmente asignados a su cargo.
   - El docente solo puede calificar y tomar asistencia en los cursos y secciones que tenga formalmente asignados en el periodo vigente.
-  - La `SECRETARIA` solo gestiona tickets, registro/estados del alumnado y matrículas; la estructura académica (periodos, cursos, materias, aulas, asignaciones) es exclusiva de `ADMIN`.
+  - La `SECRETARIA` solo gestiona tickets, registro/estados del alumnado y matrículas; la estructura académica (períodos, materias, secciones, asignaciones) es exclusiva de `ADMIN`.
   - Al ser menores de edad, la comunicación con el `ESTUDIANTE` (citaciones, avisos de falta) se canaliza por su `APODERADO`: el estudiante no registra teléfonos propios.
