@@ -110,6 +110,7 @@
 **Pendiente (por módulo):**
 - Asignación de materias a docentes y de representados a apoderados (ambas dependen del catálogo académico).
 - Catálogo académico: periodos, secciones/aulas, asignación docente.
+- Estudiantes y matrículas (`SECRETARIA`): su listado `GET /api/v1/secretaria/estudiantes` y los estados de matrícula. **Ahí nacerá `EstudianteResponse`** (con sección, matrícula y apoderado), junto con la edición acotada de la ficha del alumno; no antes, y sin reutilizar `UsuarioResponse` para ese listado — es la vista de cuentas de ADMIN, no la de alumnos de Secretaría.
 - Asistencia diaria y calificaciones vigesimales.
 - Tickets de justificación (apoderado → secretaria) y su efecto automático sobre la asistencia.
 - Materiales de clase y comunicados.
