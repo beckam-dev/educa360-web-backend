@@ -63,19 +63,6 @@ public class Docente extends Auditable {
         return materias;
     }
 
-    // Teléfonos: la colección vive en User (User.telefonos); el perfil sólo delega.
-    public Set<Telefono> getTelefonos() {
-        return user == null ? Set.of() : user.getTelefonos();
-    }
-
-    public void agregarTelefono(Telefono telefono) {
-        user.agregarTelefono(telefono);
-    }
-
-    public void quitarTelefono(Telefono telefono) {
-        user.quitarTelefono(telefono);
-    }
-
     // Métodos helper para mantener sincronizados ambos lados de la relación
 
     public void agregarMateria(Materia materia) {

@@ -49,20 +49,6 @@ public class Apoderado extends Auditable {
         this.user = user;
     }
 
-    // Teléfonos: la colección vive en User (User.telefonos); el apoderado sólo delega.
-
-    public Set<Telefono> getTelefonos() {
-        return user == null ? Set.of() : user.getTelefonos();
-    }
-
-    public void agregarTelefono(Telefono telefono) {
-        user.agregarTelefono(telefono);
-    }
-
-    public void quitarTelefono(Telefono telefono) {
-        user.quitarTelefono(telefono);
-    }
-
     public Set<ApoderadoEstudiante> getEstudiantes() {
         return estudiantes;
     }
@@ -81,7 +67,7 @@ public class Apoderado extends Auditable {
         relacion.setApoderado(null);
     }
 
-    // toString seguro: sin telefonos ni estudiantes (colecciones lazy)
+    // toString seguro: sin estudiantes (colección lazy)
 
     @Override
     public String toString() {

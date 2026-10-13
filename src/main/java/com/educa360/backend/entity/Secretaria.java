@@ -2,8 +2,6 @@ package com.educa360.backend.entity;
 
 import jakarta.persistence.*;
 
-import java.util.Set;
-
 @Entity
 @Table(name = "secretarias")
 public class Secretaria extends Auditable {
@@ -34,20 +32,6 @@ public class Secretaria extends Auditable {
 
     public void setUser(User user) {
         this.user = user;
-    }
-
-    // Teléfonos: la colección vive en User (User.telefonos); el perfil sólo delega.
-
-    public Set<Telefono> getTelefonos() {
-        return user == null ? Set.of() : user.getTelefonos();
-    }
-
-    public void agregarTelefono(Telefono telefono) {
-        user.agregarTelefono(telefono);
-    }
-
-    public void quitarTelefono(Telefono telefono) {
-        user.quitarTelefono(telefono);
     }
 
     // toString seguro: sólo ids y campos simples
