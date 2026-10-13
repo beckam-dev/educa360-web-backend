@@ -1,5 +1,9 @@
 package com.educa360.backend;
 
+import com.educa360.backend.repository.ApoderadoRepository;
+import com.educa360.backend.repository.DocenteRepository;
+import com.educa360.backend.repository.EstudianteRepository;
+import com.educa360.backend.repository.SecretariaRepository;
 import com.educa360.backend.repository.UserRepository;
 import com.educa360.backend.service.LoginAttemptService;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,10 +63,27 @@ class AuthApiTest {
     private UserRepository userRepository;
 
     @Autowired
+    private DocenteRepository docenteRepository;
+
+    @Autowired
+    private EstudianteRepository estudianteRepository;
+
+    @Autowired
+    private SecretariaRepository secretariaRepository;
+
+    @Autowired
+    private ApoderadoRepository apoderadoRepository;
+
+    @Autowired
     private LoginAttemptService loginAttempts;
 
     @BeforeEach
     void empezarDeCero() {
+        // Los perfiles tienen FK hacia users: se borran primero
+        docenteRepository.deleteAll();
+        estudianteRepository.deleteAll();
+        secretariaRepository.deleteAll();
+        apoderadoRepository.deleteAll();
         userRepository.deleteAll(); // cada test ve una BD vacía (alta inicial posible)
         loginAttempts.limpiar();    // y sin intentos fallidos acumulados
     }
@@ -76,32 +97,35 @@ class AuthApiTest {
     }
 
     @Test
-    @DisplayName("El primer usuario se crea SIEMPRE como ADMIN aunque pida otro rol")
-    void altaInicialFuerzaRolAdmin() throws Exception {
+    @DisplayName("El registro crea SIEMPRE administradores (el resto de roles tiene su endpoint)")
+    void registroCreaAdministradores() throws Exception {
         MvcResult resultado = mockMvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(cuerpo("primer@educa360.pe", "Secreta123", "11112222", "DOCENTE")))
+                        .content(cuerpo("primer@educa360.pe", "Secreta123", "11112222")))
                 .andReturn();
 
         assertEquals(201, resultado.getResponse().getStatus());
         assertTrue(resultado.getResponse().getContentAsString().contains("\"rol\":\"ADMIN\""),
-                "El rol del request debe ignorarse en el alta inicial");
+                "El registro sólo crea ADMIN: los demás roles pasan por /api/v1/admin/*");
     }
 
     @Test
-    @DisplayName("Después del alta inicial, el registro anónimo se cierra (403)")
-    void registroAnonimoSeCierraTrasElPrimerUsuario() throws Exception {
-        String admin = registrar("admin@educa360.pe", "Admin12345", "12345678", "ADMIN", null);
+    @DisplayName("El registro se cierra tras la primera cuenta, incluso con token de ADMIN")
+    void registroSeCierraTrasLaPrimeraCuenta() throws Exception {
+        String admin = registrar("admin@educa360.pe", "Admin12345", "12345678", null);
 
         assertEquals(403, enviarPost("/api/v1/auth/register",
-                cuerpo("intruso@x.pe", "Intruso123", "99998888", "ADMIN"), null).getResponse().getStatus());
+                cuerpo("intruso@x.pe", "Intruso123", "99998888"), null).getResponse().getStatus());
+        assertEquals(403, enviarPost("/api/v1/auth/register",
+                cuerpo("otro@x.pe", "OtraClave123", "87654321"), admin).getResponse().getStatus(),
+                "ni siquiera un ADMIN debe usar /auth/register: eso lo hace /admin/usuarios");
         assertNotNull(admin);
     }
 
     @Test
     @DisplayName("Login correcto devuelve token y el perfil, SIN la contraseña")
     void loginCorrectoDevuelveTokenSinPassword() throws Exception {
-        registrar("admin@educa360.pe", "Admin12345", "12345678", "ADMIN", null);
+        registrar("admin@educa360.pe", "Admin12345", "12345678", null);
 
         MvcResult login = enviarPost("/api/v1/auth/login",
                 loginBody("admin@educa360.pe", "Admin12345"), null);
@@ -124,7 +148,7 @@ class AuthApiTest {
     @Test
     @DisplayName("Contraseña incorrecta o email inexistente: 401 con el mismo mensaje")
     void credencialesInvalidasResponde401() throws Exception {
-        registrar("admin@educa360.pe", "Admin12345", "12345678", "ADMIN", null);
+        registrar("admin@educa360.pe", "Admin12345", "12345678", null);
 
         MvcResult mala = enviarPost("/api/v1/auth/login",
                 loginBody("admin@educa360.pe", "clave-mala"), null);
@@ -141,7 +165,7 @@ class AuthApiTest {
     @Test
     @DisplayName("El email no distingue mayúsculas ni espacios")
     void emailSeNormaliza() throws Exception {
-        registrar("  Lucila@Educa360.pe ", "Lucila1234", "22223333", null, null);
+        registrar("  Lucila@Educa360.pe ", "Lucila1234", "22223333", null);
 
         MvcResult login = enviarPost("/api/v1/auth/login",
                 loginBody("LUCILA@educa360.pe", "Lucila1234"), null);
@@ -154,32 +178,21 @@ class AuthApiTest {
     @DisplayName("DNI sin 8 dígitos se rechaza con 400")
     void dniInvalidoResponde400() throws Exception {
         MvcResult resultado = enviarPost("/api/v1/auth/register",
-                cuerpo("dni@x.pe", "Password123", "12A45", "ADMIN"), null);
+                cuerpo("dni@x.pe", "Password123", "12A45"), null);
 
         assertEquals(400, resultado.getResponse().getStatus());
         assertTrue(resultado.getResponse().getContentAsString().contains("8 dígitos"));
     }
 
     @Test
-    @DisplayName("Email ya registrado responde 409")
-    void emailDuplicadoResponde409() throws Exception {
-        String token = registrar("admin@educa360.pe", "Admin12345", "12345678", "ADMIN", null);
-
-        MvcResult duplicado = enviarPost("/api/v1/auth/register",
-                cuerpo("admin@educa360.pe", "OtraClave123", "87654321", "DOCENTE"), token);
-
-        assertEquals(409, duplicado.getResponse().getStatus());
-        assertTrue(duplicado.getResponse().getContentAsString().contains("ya está registrado"));
-    }
-
-    @Test
     @DisplayName("Rol con un valor que no existe responde 400, no 500")
     void rolInvalidoResponde400() throws Exception {
-        String token = registrar("admin@educa360.pe", "Admin12345", "12345678", "ADMIN", null);
+        String token = registrar("admin@educa360.pe", "Admin12345", "12345678", null);
 
-        MvcResult resultado = enviarPost("/api/v1/auth/register",
-                "{\"email\":\"x@y.pe\",\"password\":\"Prueba1234\",\"nombres\":\"A\"," +
-                        "\"apellidos\":\"B\",\"dni\":\"12345678\",\"rol\":\"FOO\"}", token);
+        // El rol ya no es un campo del registro; ahora viaja como filtro del listado
+        MvcResult resultado = mockMvc.perform(get("/api/v1/admin/usuarios?rol=FOO")
+                        .header("Authorization", "Bearer " + token))
+                .andReturn();
 
         assertEquals(400, resultado.getResponse().getStatus());
     }
@@ -195,7 +208,7 @@ class AuthApiTest {
     @Test
     @DisplayName("Ruta inexistente responde 404 y método no permitido 405")
     void erroresDeRouting() throws Exception {
-        String token = registrar("admin@educa360.pe", "Admin12345", "12345678", "ADMIN", null);
+        String token = registrar("admin@educa360.pe", "Admin12345", "12345678", null);
 
         MvcResult noExiste = mockMvc.perform(get("/api/v1/noexiste")
                         .header("Authorization", "Bearer " + token))
@@ -212,7 +225,7 @@ class AuthApiTest {
     @Test
     @DisplayName("Cuenta dada de baja no puede iniciar sesión (403)")
     void cuentaDesactivadaNoPuedeLoguear() throws Exception {
-        registrar("baja@educa360.pe", "Baja12345", "33334444", "ESTUDIANTE", null);
+        registrar("baja@educa360.pe", "Baja12345", "33334444", null);
         userRepository.findByEmail("baja@educa360.pe").ifPresent(usuario -> {
             usuario.setActivo(false);
             userRepository.save(usuario);
@@ -228,7 +241,7 @@ class AuthApiTest {
     @Test
     @DisplayName("Tras 5 fallos el login se bloquea: 429 con Retry-After")
     void fuerzaBrutaBloqueaCon429() throws Exception {
-        registrar("segura@educa360.pe", "Secreta1234", "44445555", "SECRETARIA", null);
+        registrar("segura@educa360.pe", "Secreta1234", "44445555", null);
 
         for (int i = 1; i <= 5; i++) {
             MvcResult fallo = enviarPost("/api/v1/auth/login",
@@ -249,7 +262,7 @@ class AuthApiTest {
     @Test
     @DisplayName("Un login correcto reinicia el contador de intentos")
     void aciertoReiniciaElContador() throws Exception {
-        registrar("buena@educa360.pe", "Buena12345", "66667777", "DOCENTE", null);
+        registrar("buena@educa360.pe", "Buena12345", "66667777", null);
 
         for (int i = 1; i <= 4; i++) {
             enviarPost("/api/v1/auth/login", loginBody("buena@educa360.pe", "mala-" + i), null);
@@ -271,8 +284,16 @@ class AuthApiTest {
     @Test
     @DisplayName("Sólo el rol correcto entra en cada zona")
     void rbacPorRol() throws Exception {
-        String tokenAdmin = registrar("admin@educa360.pe", "Admin12345", "12345678", "ADMIN", null);
-        String tokenEstudiante = registrar("lucia@educa360.pe", "Lucia12345", "87654321", "ESTUDIANTE", tokenAdmin);
+        String tokenAdmin = registrar("admin@educa360.pe", "Admin12345", "12345678", null);
+
+        // El estudiante se da de alta en su endpoint (allí se crea su perfil)
+        assertEquals(201, enviarPost("/api/v1/secretaria/estudiantes", """
+                        {"usuario":{"email":"lucia@educa360.pe","password":"Lucia12345",
+                                    "nombres":"Lucia","apellidos":"Gomez","dni":"87654321"},
+                         "perfil":{"fechaNacimiento":"2010-05-12"}}""", tokenAdmin)
+                .getResponse().getStatus());
+        String tokenEstudiante = tokenDe(enviarPost("/api/v1/auth/login",
+                loginBody("lucia@educa360.pe", "Lucia12345"), null).getResponse().getContentAsString());
 
         assertEquals(200, getConToken("/api/v1/demo/admin", tokenAdmin));
         assertEquals(403, getConToken("/api/v1/demo/admin", tokenEstudiante));
@@ -300,20 +321,23 @@ class AuthApiTest {
         return mockMvc.perform(peticion).andReturn().getResponse().getStatus();
     }
 
-    /** Registra una cuenta y devuelve su token (o null si se pide sin bearer). */
-    private String registrar(String email, String password, String dni, String rol, String bearer) throws Exception {
+    /**
+     * Registra una cuenta (siempre ADMIN) y devuelve su token.
+     * Ojo: registrar() falla si ya hay un ADMIN autenticado en el contexto
+     * que no sea éste; por eso los tests sólo lo usan como primer usuario.
+     */
+    private String registrar(String email, String password, String dni, String bearer) throws Exception {
         MvcResult resultado = enviarPost("/api/v1/auth/register",
-                cuerpo(email, password, dni, rol), bearer);
+                cuerpo(email, password, dni), bearer);
         assertEquals(201, resultado.getResponse().getStatus(),
                 "Registro inesperado: " + resultado.getResponse().getContentAsString());
         return tokenDe(resultado.getResponse().getContentAsString());
     }
 
-    private String cuerpo(String email, String password, String dni, String rol) {
-        String rolJson = (rol == null) ? "null" : "\"" + rol + "\"";
+    private String cuerpo(String email, String password, String dni) {
         return ("{\"email\":\"%s\",\"password\":\"%s\",\"nombres\":\"Prueba\"," +
-                "\"apellidos\":\"Testeo\",\"dni\":\"%s\",\"rol\":%s}")
-                .formatted(email, password, dni, rolJson);
+                "\"apellidos\":\"Testeo\",\"dni\":\"%s\"}")
+                .formatted(email, password, dni);
     }
 
     private String loginBody(String email, String password) {

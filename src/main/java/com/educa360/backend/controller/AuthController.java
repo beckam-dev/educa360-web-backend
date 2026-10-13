@@ -2,7 +2,7 @@ package com.educa360.backend.controller;
 
 import com.educa360.backend.dto.AuthResponse;
 import com.educa360.backend.dto.LoginRequest;
-import com.educa360.backend.dto.RegisterRequest;
+import com.educa360.backend.dto.UsuarioBasicoRequest;
 import com.educa360.backend.dto.UserResponse;
 import com.educa360.backend.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -40,9 +40,13 @@ public class AuthController {
         return ResponseEntity.ok(authService.login(request, httpRequest.getRemoteAddr()));
     }
 
-    /** POST /api/v1/auth/register -> pública sólo hasta crear la primera cuenta */
+    /**
+     * POST /api/v1/auth/register -> sólo funciona con la BD vacía: crea la
+     * primera cuenta (siempre ADMIN). En cuanto existe una, responde 403 y
+     * las altas pasan a /api/v1/admin/*.
+     */
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+    public ResponseEntity<AuthResponse> register(@Valid @RequestBody UsuarioBasicoRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
     }
 

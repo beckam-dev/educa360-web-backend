@@ -1,6 +1,6 @@
 package com.educa360.backend.controller;
 
-import com.educa360.backend.dto.UsuarioCreateRequest;
+import com.educa360.backend.dto.UsuarioBasicoRequest;
 import com.educa360.backend.dto.UsuarioEstadoRequest;
 import com.educa360.backend.dto.UsuarioPasswordRequest;
 import com.educa360.backend.dto.UsuarioResponse;
@@ -24,10 +24,12 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * Gestión de usuarios y perfiles. Exclusiva de ADMIN.
+ * Ciclo de vida de las CUENTAS de acceso (exclusivo de ADMIN):
+ * listado, detalle, edición de datos básicos, baja lógica y reseteo.
  *
- * El rol del request determina el perfil que se crea (consistencia
- * perfil ↔ rol garantizada en UsuarioService).
+ * El alta de cada rol vive en su propio controlador
+ * (DocenteController, EstudianteController, SecretariaController,
+ * ApoderadoController); aquí sólo se da de alta ADMIN, que no tiene perfil.
  */
 @RestController
 @RequestMapping("/api/v1/admin/usuarios")
@@ -54,10 +56,10 @@ public class UsuarioController {
         return ResponseEntity.ok(usuarioService.obtener(id));
     }
 
-    /** POST /api/v1/admin/usuarios -> crea la cuenta Y su perfil según el rol */
+    /** POST /api/v1/admin/usuarios -> alta de administrador (no tiene perfil) */
     @PostMapping
-    public ResponseEntity<UsuarioResponse> crear(@Valid @RequestBody UsuarioCreateRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(usuarioService.crear(request));
+    public ResponseEntity<UsuarioResponse> crearAdmin(@Valid @RequestBody UsuarioBasicoRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(usuarioService.crearAdmin(request));
     }
 
     @PutMapping("/{id}")

@@ -2,19 +2,16 @@ package com.educa360.backend.service;
 
 import com.educa360.backend.dto.AuthResponse;
 import com.educa360.backend.dto.LoginRequest;
-import com.educa360.backend.dto.RegisterRequest;
+import com.educa360.backend.dto.UsuarioBasicoRequest;
 import com.educa360.backend.dto.UserResponse;
 import com.educa360.backend.entity.User;
-import com.educa360.backend.exception.ConflictException;
 import com.educa360.backend.exception.RateLimitedException;
 import com.educa360.backend.repository.UserRepository;
 import com.educa360.backend.security.JwtService;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -23,26 +20,24 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AuthService {
 
-    private static final String ROLE_ADMIN = "ROLE_ADMIN";
-
     private final UserRepository userRepository;
     private final AuthenticationManager authenticationManager;
-    private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final LoginAttemptService loginAttempts;
+    private final UsuarioService usuarioService;
 
     public AuthService(
             UserRepository userRepository,
             AuthenticationManager authenticationManager,
-            PasswordEncoder passwordEncoder,
             JwtService jwtService,
-            LoginAttemptService loginAttempts
+            LoginAttemptService loginAttempts,
+            UsuarioService usuarioService
     ) {
         this.userRepository = userRepository;
         this.authenticationManager = authenticationManager;
-        this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.loginAttempts = loginAttempts;
+        this.usuarioService = usuarioService;
     }
 
     /**
@@ -79,45 +74,32 @@ public class AuthService {
     }
 
     /**
-     * Alta de cuentas.
+     * Arranque del sistema (patrón "bootstrapping").
      *
-     * Alta inicial (patrón de "bootstrapping"): si la BD no tiene NINGÚN
-     * usuario, cualquiera puede crear el primero. En ese caso el rol SIEMPRE
-     * es ADMIN (se ignora el del request): si el primer usuario naciera con
-     * otro rol, el sistema quedaría bloqueado, porque a partir de ahí sólo un
-     * ADMIN puede crear cuentas. Ese mismo "truco" neutraliza la condición de
-     * carrera de count(): como peor caso se crearían dos ADMIN, nunca un
-     * sistema sin administradores.
+     * Único caso en que alguien sin cuenta puede crear una: si la BD no tiene
+     * NINGÚN usuario, cualquiera crea el primero, y nace siempre como ADMIN
+     * (si naciera con otro rol, el sistema quedaría bloqueado: a partir de ahí
+     * sólo un ADMIN podría crear cuentas). El "truco" neutraliza además la
+     * condición de carrera de count(): como peor caso se crearían dos ADMIN,
+     * nunca un sistema sin administradores.
+     *
+     * En cuanto existe una sola cuenta, este endpoint se cierra (403):
+     * de ahí en adelante todas las altas las hace un ADMIN en
+     * /api/v1/admin/{usuarios,docentes,estudiantes,secretarias,apoderados}.
+     * Un solo interruptor + una sola zona de gestión = sin caminos paralelos.
+     *
+     * Toda la creación pasa por UsuarioService.crearCuenta(): un solo camino
+     * de alta significa una sola verdad (unicidad de email/DNI, hash de
+     * contraseña, teléfonos) y ninguna cuenta a medias.
      */
     @Transactional
-    public AuthResponse register(RegisterRequest request) {
-        boolean esPrimerUsuario = userRepository.count() == 0;
-
-        if (!esPrimerUsuario && !isCurrentAdmin()) {
-            throw new AccessDeniedException("Sólo un ADMIN puede crear cuentas de usuario");
+    public AuthResponse register(UsuarioBasicoRequest request) {
+        if (userRepository.count() != 0) {
+            throw new AccessDeniedException(
+                    "El sistema ya tiene usuarios: las altas las realiza un ADMIN en /api/v1/admin/usuarios");
         }
 
-        if (userRepository.existsByEmail(request.email())) {
-            throw new ConflictException("El email " + request.email() + " ya está registrado");
-        }
-        if (userRepository.existsByDni(request.dni())) {
-            throw new ConflictException("El DNI " + request.dni() + " ya está registrado");
-        }
-
-        User.Role rol = esPrimerUsuario
-                ? User.Role.ADMIN  // forzado: no se confía en el request
-                : (request.rol() != null ? request.rol() : User.Role.ADMIN);
-
-        User user = new User(
-                request.email(),
-                passwordEncoder.encode(request.password()),
-                request.nombres(),
-                request.apellidos(),
-                request.dni(),
-                rol
-        );
-
-        User guardado = userRepository.save(user);
+        User guardado = usuarioService.crearCuenta(request, User.Role.ADMIN);
         return buildAuthResponse(guardado);
     }
 
@@ -127,12 +109,6 @@ public class AuthService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
         return UserResponse.from(user);
-    }
-
-    private boolean isCurrentAdmin() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        return authentication != null && authentication.getAuthorities().stream()
-                .anyMatch(authority -> ROLE_ADMIN.equals(authority.getAuthority()));
     }
 
     private AuthResponse buildAuthResponse(User user) {

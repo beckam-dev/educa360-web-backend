@@ -25,7 +25,7 @@
   - `security`: `SecurityConfig` (SecurityFilterChain + CORS), `JwtService`, `JwtAuthenticationFilter`, `AppUserDetailsService`.
   - `service`: `AuthService` (login, registro, `/me`) y `LoginAttemptService` (límite de intentos de login).
   - `exception`: `GlobalExceptionHandler` (`@RestControllerAdvice`), `ApiError`, `ConflictException` (409) y `RateLimitedException` (429).
-- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 39 tests, ejecutados por el CI (GitHub Actions) en cada push.
+- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 42 tests, ejecutados por el CI (GitHub Actions) en cada push.
 - **Entorno:** Docker Compose (`docker compose up -d` → Postgres + backend). Los secretos viven en `.env` (no versionado; su plantilla vacía es `.env.example`) y el backend **no arranca** sin `APP_JWT_SECRET`. Postgres sólo escucha en `127.0.0.1`.
 
 ---
@@ -101,9 +101,9 @@
 
 **Hecho y probado:**
 - Autenticación y autorización: login JWT, registro con alta inicial, `/me`, RBAC por rol, límite de intentos, errores uniformes en JSON y CORS para el SPA.
-- Gestión de usuarios y perfiles (`/api/v1/admin/usuarios`): alta con creación automática del perfil según el rol, listado con filtros, edición, baja lógica y reseteo de contraseña.
+- Gestión de usuarios y perfiles: altas por rol con cuenta y perfil creados en la misma transacción, en dos zonas — personal (`/api/v1/admin/{usuarios,docentes,secretarias}`, sólo `ADMIN`) y alumnos/familias (`/api/v1/secretaria/{estudiantes,apoderados}`, `ADMIN` + `SECRETARIA`). Listado con filtros, edición, baja lógica y reseteo de contraseña en `/api/v1/admin/usuarios`. `/auth/register` queda reducido al arranque (sólo con BD vacía): un solo camino de creación, sin duplicidades.
 - 9 entidades: `Auditable`, `User`, `Docente`, `Estudiante`, `Apoderado`, `Secretaria`, `Materia`, `Telefono`, `ApoderadoEstudiante`.
-- 39 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
+- 42 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
 - Docker Compose (Postgres + backend) con secretos fuera de Git y `.env.example` para el equipo.
 - Documentación interactiva en Swagger: `http://localhost:8080/swagger-ui/index.html`.
 
@@ -119,8 +119,8 @@
 **Cómo se ejecuta:**
 - `docker compose up -d` → Postgres (sólo accesible en `127.0.0.1`) + backend en `http://localhost:8080`.
 - `./mvnw spring-boot:run` → desarrollo con recarga; usa el mismo Postgres de Docker.
-- `./mvnw test` → 29 tests contra una PostgreSQL efímera (requiere Docker; sin él se saltan).
-- Alta inicial: la primera cuenta se crea con `POST /api/v1/auth/register` y queda como `ADMIN`.
+- `./mvnw test` → 42 tests contra una PostgreSQL efímera (requiere Docker; sin él se saltan).
+- Alta inicial: la primera cuenta se crea con `POST /api/v1/auth/register` (sólo con BD vacía) y queda como `ADMIN`; en cuanto hay una, ese endpoint se cierra y todo lo demás se gestiona en `/api/v1/admin/...`.
 
 ---
 
@@ -128,21 +128,29 @@
 - **Autenticación:**
   - `POST /api/v1/auth/login` (`{email, password}`) → `200` con `{token, tokenType: "Bearer", expiresIn (segundos), user}`.
   - **Límite de intentos (anti fuerza bruta):** 5 fallos dentro de 15 minutos bloquean el login durante 15 minutos (medidos desde el último fallo) → `429` con header `Retry-After`. Un acierto reinicia el contador y la clave es `email+IP`, para que el que queda bloqueado sea el que falla y no la víctima. Se comprueba antes de validar la contraseña. El estado vive en memoria (se pierde al reiniciar; con varias instancias haría falta Redis). Configurable con `app.security.login.*`.
-  - `POST /api/v1/auth/register` → alta de cuenta. **Alta inicial (bootstrapping):** si la BD no tiene ninguna cuenta, cualquiera puede crear la primera y su rol es **siempre `ADMIN`** (se ignora el `rol` del request para no dejar el sistema sin administradores); a partir de ahí sólo un `ADMIN` autenticado puede crear cuentas y ahí sí se respeta el rol pedido. El email se normaliza a minúsculas y el DNI debe tener 8 dígitos.
+  - `POST /api/v1/auth/register` → **arranque del sistema** (`UsuarioBasicoRequest`: email, contraseña, nombres, apellidos, DNI, teléfonos). Funciona **únicamente con la BD vacía**: cualquiera crea la primera cuenta y nace **siempre `ADMIN`** (si naciera con otro rol, el sistema quedaría bloqueado, ya que a partir de ahí sólo un ADMIN podría crear cuentas; el "truco" además neutraliza la condición de carrera de `count()`, porque el peor caso son dos ADMIN, nunca un sistema sin administradores). En cuanto existe una sola cuenta, responde `403` — **incluso con token de ADMIN** — y todas las altas pasan a `/api/v1/admin/{usuarios,docentes,estudiantes,secretarias,apoderados}`, donde cada servicio crea la cuenta **y su perfil** con los datos que el rol exige. Un solo interruptor + una sola zona de gestión = sin caminos paralelos. Todas las altas pasan por `UsuarioService.crearCuenta()` → una sola verdad (unicidad de email/DNI, hash BCrypt, teléfonos) y ninguna cuenta a medias. El email se normaliza a minúsculas y el DNI debe tener 8 dígitos.
   - `GET /api/v1/auth/me` → perfil del usuario contenido en el token.
   - El cliente envía `Authorization: Bearer <token>` en cada petición. API **stateless**: sin sesiones ni cookies.
   - Errores en JSON (`ApiError`, sin stack traces): `400` validación de DTO con detalle campo a campo o cuerpo ilegible, `401` credenciales inválidas o token ausente, `403` usuario inactivo o sin permiso, `404`/`405`/`415` para ruta, método o `Content-Type` incorrectos, `409` email/DNI duplicado, `429` límite de intentos de login, `500` sólo para fallos inesperados.
   - `AppCORS`: orígenes del SPA por propiedad `app.cors.allowed-origins` (sin credenciales: la auth va en el header).
   - Validación de roles mediante `@PreAuthorize("hasRole('ADMIN')")`, `@PreAuthorize("hasRole('SECRETARIA')")`, `@PreAuthorize("hasRole('DOCENTE')")`, etc.
   - Endpoints de prueba de RBAC: `GET /api/v1/demo/{admin|secretaria|docente|estudiante|apoderado}` y `/api/v1/demo/authenticated`.
-- **Gestión de usuarios y perfiles (exclusivo de `ADMIN`):**
-  - `GET /api/v1/admin/usuarios?rol=&activo=&q=` → listado con filtros combinables; `q` busca por email, nombres, apellidos o DNI.
-  - `GET /api/v1/admin/usuarios/{id}` → detalle (`404` si no existe).
-  - `POST /api/v1/admin/usuarios` → crea la cuenta **y su perfil automáticamente según el rol** (consistencia perfil ↔ rol garantizada: no puede existir un `User` cuyo rol no corresponda a su perfil). `ESTUDIANTE` exige `fechaNacimiento` y **no admite teléfonos** (`400`: la comunicación es con su apoderado); `DOCENTE` admite `titulo`. Email/DNI duplicados → `409`.
-  - `PUT /api/v1/admin/usuarios/{id}` → nombres, apellidos, teléfonos (lista vacía = quitar todos) y campos del perfil. **El rol no es editable**: para cambiarlo se da de baja la cuenta y se crea otra.
+- **Gestión de usuarios y perfiles:** cada rol se da de alta en **su endpoint**, con la forma `{"usuario": {...}, "perfil": {...}}`: la cuenta (`UsuarioBasicoRequest`, común a todos) y los datos propios del perfil (`DocenteRequest`, `EstudianteRequest`, `SecretariaRequest`, `ApoderadoRequest`) van **separados**, de modo que un perfil puede reusarse en otros módulos sin arrastrar credenciales. Convenio de autorización: **la ruta nombra el dominio responsable y el `@PreAuthorize` dice quién tiene permiso** (`ADMIN` es siempre superconjunto).
+  - **Personal — sólo `ADMIN`** (`/api/v1/admin/...`):
+    - `POST /api/v1/admin/usuarios` → alta de `ADMIN`, el único rol sin perfil propio.
+    - `POST /api/v1/admin/docentes` → crea la cuenta **y** el perfil `Docente` en la misma transacción (`titulo` opcional).
+    - `POST /api/v1/admin/secretarias` → hoy con `"perfil": {}` (campos reservados).
+  - **Alumnos y familias — `ADMIN` y `SECRETARIA`** (`/api/v1/secretaria/...`):
+    - `POST /api/v1/secretaria/estudiantes` → crea cuenta + perfil `Estudiante`; exige `fechaNacimiento` y **rechaza teléfonos** (`400`: la comunicación es con su apoderado). Secretaría es quien recibe a las familias, de ahí que sea su dominio.
+    - `POST /api/v1/secretaria/apoderados` → hoy con `"perfil": {}`; sus representados vendrán con el módulo de matrículas.
+    - *Pendiente:* que Secretaría pueda **editar** la ficha del alumno y cambiar el estado de su matrícula (módulo 3). Esa edición tendrá que venir **acotada a estudiantes y apoderados**; nunca al listado general de cuentas.
+  - **Consistencia perfil ↔ rol garantizada:** el rol lo fija el servicio de cada perfil (no un campo del request), así que no puede existir un `User` cuyo rol no corresponda a su perfil. El rol **no es editable**: para cambiarlo se da de baja la cuenta y se crea otra.
+  - Email/DNI duplicados → `409`; la comprobación vive en un solo punto (`UsuarioService.crearCuenta()`), por el que pasan **todas** las altas, incluida `/auth/register`.
+  - `GET /api/v1/admin/usuarios?rol=&activo=&q=` → listado con filtros combinables; `q` busca por email, nombres, apellidos o DNI. `GET /api/v1/admin/usuarios/{id}` → detalle (`404` si no existe). **Sólo `ADMIN`**: es el listado de TODAS las cuentas (incluidos administradores y docentes).
+  - `PUT /api/v1/admin/usuarios/{id}` → nombres, apellidos, teléfonos (lista vacía = quitar todos) y campos del perfil.
   - `PATCH /api/v1/admin/usuarios/{id}/activo` → baja lógica (`{activo: false}`), que corta el acceso al instante.
   - `PATCH /api/v1/admin/usuarios/{id}/password` → reseteo por `ADMIN` (no invalida los tokens ya emitidos; eso lo hace la baja).
-  - Todo con `@PreAuthorize("hasRole('ADMIN')")`: sin token `401`, con otro rol `403`.
+  - Sin token `401`; sin permiso para la zona `403`.
 - **Flujo de Justificaciones:**
   - Solo el apoderado puede registrar solicitudes de justificación para sus representados.
   - La `SECRETARIA` revisa el sustento; si lo aprueba, se actualiza el estado de la asistencia del estudiante de forma transaccional.

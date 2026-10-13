@@ -8,10 +8,21 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * Vista de un usuario para administración: datos básicos + su perfil.
+ * Vista de una cuenta para el panel de administración: datos básicos + los
+ * campos de su perfil. La contraseña NUNCA sale.
  *
- * Los campos de perfil (titulo, fechaNacimiento, estadoEstudiante) son
- * null cuando no corresponden al rol; la contraseña NUNCA sale.
+ * DECISIÓN DE DISEÑO: un solo DTO con los campos de perfil anulables
+ * (titulo sólo en DOCENTE, fechaNacimiento/estadoEstudiante sólo en
+ * ESTUDIANTE), en vez de un DTO por rol. La regla del proyecto es:
+ * las ENTRADAS se dividen por ROL (porque las reglas de validación difieren:
+ * un estudiante exige fecha de nacimiento y prohíbe teléfonos), mientras que
+ * las SALIDAS se dividen por PANTALLA (porque la tabla de ADMIN lista todos
+ * los roles en las mismas columnas; partirlo por rol obligaría a mezclar
+ * tres tipos en una sola tabla).
+ *
+ * Se partirá cuando exista un segundo consumidor con otras necesidades:
+ * p. ej. cuando Secretaria liste alumnos necesitará sección, matrícula y
+ * apoderado, y ahí nacerá un EstudianteResponse propio.
  */
 public record UsuarioResponse(
         Long id,

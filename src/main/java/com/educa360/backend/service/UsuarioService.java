@@ -1,15 +1,12 @@
 package com.educa360.backend.service;
 
-import com.educa360.backend.dto.UsuarioCreateRequest;
+import com.educa360.backend.dto.UsuarioBasicoRequest;
 import com.educa360.backend.dto.UsuarioResponse;
 import com.educa360.backend.dto.UsuarioUpdateRequest;
-import com.educa360.backend.entity.Apoderado;
 import com.educa360.backend.entity.Docente;
 import com.educa360.backend.entity.Estudiante;
-import com.educa360.backend.entity.Secretaria;
 import com.educa360.backend.entity.Telefono;
 import com.educa360.backend.entity.User;
-import com.educa360.backend.exception.BadRequestException;
 import com.educa360.backend.exception.ConflictException;
 import com.educa360.backend.exception.NotFoundException;
 import com.educa360.backend.repository.ApoderadoRepository;
@@ -25,16 +22,20 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 /**
- * Gestión de usuarios y perfiles (módulo de ADMIN).
+ * Ciclo de vida de la CUENTA de acceso: creación de la credencial, listado,
+ * edición de los datos básicos, baja lógica y reseteo de contraseña.
  *
- * REGLA CENTRAL: el rol decide el perfil. Al crear una cuenta se genera
- * automáticamente su perfil 1:1 (DOCENTE -> Docente, ESTUDIANTE -> Estudiante...),
- * por lo que es imposible tener un User con un rol que no corresponda a su
- * perfil. Por lo mismo, el rol no es editable: para cambiarlo se da de baja
- * la cuenta y se crea otra.
+ * El perfil de cada rol NO se crea aquí: lo hacen los servicios de cada rol
+ * (DocenteService, EstudianteService, SecretariaService, ApoderadoService)
+ * llamando a {@link #crearCuenta(UsuarioBasicoRequest, User.Role)}. Así cada
+ * regla vive en la clase que la conoce (p. ej. la de "un estudiante no tiene
+ * teléfonos" está en EstudianteService), y sólo ADMIN, que no tiene perfil,
+ * se da de alta directamente desde este servicio.
+ *
+ * Consistencia perfil ↔ rol: como el rol lo fija el servicio que llama, es
+ * imposible crear una cuenta con un rol que no corresponda a su perfil.
  */
 @Service
 public class UsuarioService {
@@ -62,73 +63,46 @@ public class UsuarioService {
         this.passwordEncoder = passwordEncoder;
     }
 
-    // ==================== Altas ====================
+    // ==================== Creación de la cuenta ====================
 
+    /**
+     * Crea la credencial de acceso (User) con las validaciones comunes:
+     * email y DNI no repetidos, contraseña hasheada y teléfonos.
+     *
+     * Método compartido: lo usan los servicios de cada perfil y el alta de
+     * administradores. No toca ningún perfil (el caller decide el rol y crea
+     * su perfil en la misma transacción).
+     */
     @Transactional
-    public UsuarioResponse crear(UsuarioCreateRequest request) {
-        validarReglasDelRol(request);
-
-        if (userRepository.existsByEmail(request.email())) {
-            throw new ConflictException("El email " + request.email() + " ya está registrado");
+    public User crearCuenta(UsuarioBasicoRequest datos, User.Role rol) {
+        if (userRepository.existsByEmail(datos.email())) {
+            throw new ConflictException("El email " + datos.email() + " ya está registrado");
         }
-        if (userRepository.existsByDni(request.dni())) {
-            throw new ConflictException("El DNI " + request.dni() + " ya está registrado");
+        if (userRepository.existsByDni(datos.dni())) {
+            throw new ConflictException("El DNI " + datos.dni() + " ya está registrado");
         }
 
         User user = new User(
-                request.email(),
-                passwordEncoder.encode(request.password()),
-                request.nombres(),
-                request.apellidos(),
-                request.dni(),
-                request.rol()
+                datos.email(),
+                passwordEncoder.encode(datos.password()),
+                datos.nombres(),
+                datos.apellidos(),
+                datos.dni(),
+                rol
         );
-        if (request.telefonos() != null) {
-            request.telefonos().forEach(numero -> user.agregarTelefono(new Telefono(numero)));
+        if (datos.telefonos() != null) {
+            datos.telefonos().forEach(numero -> user.agregarTelefono(new Telefono(numero)));
         }
-
-        User guardado = userRepository.save(user);
-        return guardarPerfil(guardado, request);
+        return userRepository.save(user);
     }
 
-    /** El rol exige datos propios y prohíbe otros: aquí se hacen cumplir. */
-    private void validarReglasDelRol(UsuarioCreateRequest request) {
-        if (request.rol() != User.Role.ESTUDIANTE) {
-            return;
-        }
-        if (request.fechaNacimiento() == null) {
-            throw new BadRequestException("Un estudiante debe registrar su fecha de nacimiento");
-        }
-        if (request.telefonos() != null && !request.telefonos().isEmpty()) {
-            throw new BadRequestException(
-                    "Un estudiante no registra teléfonos propios: la comunicación es con su apoderado");
-        }
-    }
-
-    /** Crea el perfil 1:1 que corresponde al rol. ADMIN no tiene perfil aparte. */
-    private UsuarioResponse guardarPerfil(User user, UsuarioCreateRequest request) {
-        return switch (user.getRol()) {
-            case DOCENTE -> {
-                Docente docente = docenteRepository.save(new Docente(user, request.titulo()));
-                yield UsuarioResponse.desde(user, docente.getTitulo(), null, null);
-            }
-            case ESTUDIANTE -> {
-                Estudiante estudiante =
-                        estudianteRepository.save(new Estudiante(user, request.fechaNacimiento()));
-                yield UsuarioResponse.desde(user, null,
-                        estudiante.getFechaNacimiento(), estudiante.getEstado().name());
-            }
-            case SECRETARIA -> {
-                secretariaRepository.save(new Secretaria(user));
-                yield UsuarioResponse.desde(user, null, null, null);
-            }
-            case APODERADO -> {
-                apoderadoRepository.save(new Apoderado(user));
-                yield UsuarioResponse.desde(user, null, null, null);
-            }
-            // El administrador no tiene perfil propio: su rol vive en User
-            case ADMIN -> UsuarioResponse.desde(user, null, null, null);
-        };
+    /**
+     * Alta de administrador: ADMIN no tiene perfil propio, así que su cuenta
+     * es todo lo que existe. Éste es el único rol que se crea aquí.
+     */
+    @Transactional
+    public UsuarioResponse crearAdmin(UsuarioBasicoRequest datos) {
+        return aRespuesta(crearCuenta(datos, User.Role.ADMIN));
     }
 
     // ==================== Consultas ====================
@@ -164,12 +138,12 @@ public class UsuarioService {
                 ? userRepository.findAll(Sort.by("id"))
                 : userRepository.findAll(spec, Sort.by("id"));
 
-        return usuarios.stream().map(this::respuesta).toList();
+        return usuarios.stream().map(this::aRespuesta).toList();
     }
 
     @Transactional(readOnly = true)
     public UsuarioResponse obtener(Long id) {
-        return respuesta(buscar(id));
+        return aRespuesta(buscar(id));
     }
 
     // ==================== Modificaciones ====================
@@ -199,7 +173,7 @@ public class UsuarioService {
         }
 
         User guardado = userRepository.save(user);
-        return respuesta(guardado);
+        return aRespuesta(guardado);
     }
 
     /** Baja lógica: la cuenta deja de poder entrar; sus datos permanecen. */
@@ -207,7 +181,7 @@ public class UsuarioService {
     public UsuarioResponse cambiarActivo(Long id, boolean activo) {
         User user = buscar(id);
         user.setActivo(activo);
-        return respuesta(userRepository.save(user));
+        return aRespuesta(userRepository.save(user));
     }
 
     /**
@@ -219,18 +193,13 @@ public class UsuarioService {
     public UsuarioResponse restablecerPassword(Long id, String passwordNueva) {
         User user = buscar(id);
         user.setPassword(passwordEncoder.encode(passwordNueva));
-        return respuesta(userRepository.save(user));
+        return aRespuesta(userRepository.save(user));
     }
 
     // ==================== Helpers ====================
 
-    private User buscar(Long id) {
-        return userRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("El usuario " + id + " no existe"));
-    }
-
-    /** Monta la respuesta leyendo el perfil que corresponda al rol. */
-    private UsuarioResponse respuesta(User user) {
+    /** Monta la respuesta de administración leyendo el perfil de su rol. */
+    public UsuarioResponse aRespuesta(User user) {
         return switch (user.getRol()) {
             case DOCENTE -> docenteRepository.findByUser(user)
                     .map(docente -> UsuarioResponse.desde(user, docente.getTitulo(), null, null))
@@ -242,5 +211,10 @@ public class UsuarioService {
             case SECRETARIA, APODERADO, ADMIN ->
                     UsuarioResponse.desde(user, null, null, null);
         };
+    }
+
+    private User buscar(Long id) {
+        return userRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("El usuario " + id + " no existe"));
     }
 }

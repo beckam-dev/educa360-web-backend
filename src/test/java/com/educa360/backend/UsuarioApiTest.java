@@ -16,6 +16,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -33,6 +34,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 /**
  * Tests del módulo de gestión de usuarios y perfiles.
+ *
+ * Cada rol se da de alta en su endpoint con la forma
+ * {"usuario": {...}, "perfil": {...}}; los servicios de cada rol son los que
+ * crean la cuenta y su perfil en la misma transacción.
  * PostgreSQL efímera (Testcontainers): no toca la BD de desarrollo.
  */
 @Testcontainers(disabledWithoutDocker = true)
@@ -52,7 +57,7 @@ class UsuarioApiTest {
 
     private static final Pattern TOKEN_PATTERN = Pattern.compile("\"token\":\"([^\"]+)\"");
 
-    private static final String RUTA = "/api/v1/admin/usuarios";
+    private static final String USUARIOS = "/api/v1/admin/usuarios";
 
     @Autowired
     private MockMvc mockMvc;
@@ -90,9 +95,9 @@ class UsuarioApiTest {
     // ==================== Altas ====================
 
     @Test
-    @DisplayName("Crear un DOCENTE crea su perfil automáticamente con el título")
+    @DisplayName("Crear un DOCENTE en su endpoint crea su perfil con el título")
     void crearDocenteCreaSuPerfil() throws Exception {
-        MvcResult resultado = crear(docenteBody("doc1@educa360.pe", "20000001"), admin);
+        MvcResult resultado = crear("/api/v1/admin/docentes", docenteBody("doc1@educa360.pe", "20000001"));
 
         assertEquals(201, resultado.getResponse().getStatus());
         String cuerpo = resultado.getResponse().getContentAsString();
@@ -102,53 +107,126 @@ class UsuarioApiTest {
     }
 
     @Test
-    @DisplayName("Un ESTUDIANTE exige fecha de nacimiento")
-    void estudianteSinFechaNacimientoResponde400() throws Exception {
-        String body = """
-                {"email":"alu@educa360.pe","password":"Alumno1234","nombres":"Alma","apellidos":"Luna",
-                 "dni":"30000001","rol":"ESTUDIANTE"}""";
+    @DisplayName("SECRETARIA se da de alta con perfil vacío (hoy no tiene campos)")
+    void crearSecretariaConPerfilVacio() throws Exception {
+        MvcResult resultado = crear("/api/v1/admin/secretarias", """
+                {"usuario":{"email":"sec@educa360.pe","password":"Secreta1234","nombres":"Sara",
+                            "apellidos":"Quintos","dni":"21000001","telefonos":["912345678"]},
+                 "perfil":{}}""");
 
-        MvcResult resultado = crear(body, admin);
+        assertEquals(201, resultado.getResponse().getStatus());
+        assertTrue(resultado.getResponse().getContentAsString().contains("\"rol\":\"SECRETARIA\""));
+        assertEquals(1, secretariaRepository.count());
+    }
+
+    @Test
+    @DisplayName("Un ESTUDIANTE exige fecha de nacimiento en su perfil")
+    void estudianteSinFechaNacimientoResponde400() throws Exception {
+        MvcResult resultado = crear("/api/v1/secretaria/estudiantes", """
+                {"usuario":{"email":"alu@educa360.pe","password":"Alumno1234","nombres":"Alma",
+                            "apellidos":"Luna","dni":"30000001"},
+                 "perfil":{}}""");
 
         assertEquals(400, resultado.getResponse().getStatus());
         assertTrue(resultado.getResponse().getContentAsString().contains("fecha de nacimiento"));
     }
 
     @Test
+    @DisplayName("Un ESTUDIANTE sin bloque 'perfil' responde 400 (no 500)")
+    void estudianteSinPerfilResponde400() throws Exception {
+        MvcResult resultado = crear("/api/v1/secretaria/estudiantes", """
+                {"usuario":{"email":"alu0@educa360.pe","password":"Alumno1234","nombres":"Alma",
+                            "apellidos":"Luna","dni":"30000000"}}""");
+
+        assertEquals(400, resultado.getResponse().getStatus());
+    }
+
+    @Test
     @DisplayName("Un ESTUDIANTE no puede tener teléfonos: la comunicación es con su apoderado")
     void estudianteConTelefonosResponde400() throws Exception {
-        String body = """
-                {"email":"alu2@educa360.pe","password":"Alumno1234","nombres":"Alma","apellidos":"Luna",
-                 "dni":"30000002","rol":"ESTUDIANTE","fechaNacimiento":"2010-05-12","telefonos":["987654321"]}""";
-
-        MvcResult resultado = crear(body, admin);
+        MvcResult resultado = crear("/api/v1/secretaria/estudiantes", """
+                {"usuario":{"email":"alu2@educa360.pe","password":"Alumno1234","nombres":"Alma",
+                            "apellidos":"Luna","dni":"30000002","telefonos":["987654321"]},
+                 "perfil":{"fechaNacimiento":"2010-05-12"}}""");
 
         assertEquals(400, resultado.getResponse().getStatus());
         assertTrue(resultado.getResponse().getContentAsString().contains("apoderado"));
     }
 
     @Test
-    @DisplayName("Email o DNI ya usados: 409")
+    @DisplayName("Email o DNI ya usados: 409 (en cualquier rol)")
     void duplicadosResponde409() throws Exception {
-        assertEquals(201, crear(docenteBody("dup@educa360.pe", "40000001"), admin).getResponse().getStatus());
+        assertEquals(201, crear("/api/v1/admin/docentes",
+                docenteBody("dup@educa360.pe", "40000001")).getResponse().getStatus());
 
-        assertEquals(409, crear(docenteBody("dup@educa360.pe", "40000009"), admin).getResponse().getStatus());
-        assertEquals(409, crear(docenteBody("otro@educa360.pe", "40000001"), admin).getResponse().getStatus());
+        assertEquals(409, crear("/api/v1/admin/docentes",
+                docenteBody("dup@educa360.pe", "40000009")).getResponse().getStatus());
+        assertEquals(409, crear("/api/v1/secretaria/estudiantes", """
+                {"usuario":{"email":"otro@educa360.pe","password":"Alumno1234","nombres":"Alma",
+                            "apellidos":"Luna","dni":"40000001"},
+                 "perfil":{"fechaNacimiento":"2010-05-12"}}""").getResponse().getStatus());
+    }
+
+    @Test
+    @DisplayName("POST /admin/usuarios crea administradores, que no tienen perfil")
+    void crearAdminNoCreaPerfil() throws Exception {
+        MvcResult resultado = crear(USUARIOS, """
+                {"email":"admin2@educa360.pe","password":"Admin23456","nombres":"Adrian",
+                 "apellidos":"Muros","dni":"11000002"}""");
+
+        assertEquals(201, resultado.getResponse().getStatus());
+        assertTrue(resultado.getResponse().getContentAsString().contains("\"rol\":\"ADMIN\""));
+        assertEquals(0, docenteRepository.count() + estudianteRepository.count()
+                + secretariaRepository.count() + apoderadoRepository.count());
     }
 
     // ==================== Autorización ====================
 
     @Test
-    @DisplayName("Sólo ADMIN puede gestionar usuarios")
-    void rbacDelModulo() throws Exception {
-        String tokenEstudiante = crearYTokenear("""
-                {"email":"alu3@educa360.pe","password":"Alumno1234","nombres":"Alma","apellidos":"Luna",
-                 "dni":"30000003","rol":"ESTUDIANTE","fechaNacimiento":"2011-03-03"}""");
+    @DisplayName("SECRETARIA puede registrar estudiantes y apoderados; DOCENTE no")
+    void secretariaRegistraAlumnosYApoderados() throws Exception {
+        // Una secretaria creada por ADMIN...
+        String tokenSecretaria = altaYToken("/api/v1/admin/secretarias", """
+                {"usuario":{"email":"sec@educa360.pe","password":"Secreta1234","nombres":"Sara",
+                            "apellidos":"Quintos","dni":"21000001","telefonos":["912345678"]},
+                 "perfil":{}}""", "sec@educa360.pe", "Secreta1234");
 
-        assertEquals(401, mockMvc.perform(get(RUTA)).andReturn().getResponse().getStatus());
-        assertEquals(403, mockMvc.perform(get(RUTA).header("Authorization", "Bearer " + tokenEstudiante))
+        // ...puede dar de alta alumnos y familias en SU zona
+        assertEquals(201, crearCon("/api/v1/secretaria/estudiantes", """
+                {"usuario":{"email":"alumna@educa360.pe","password":"Alumno1234","nombres":"Alma",
+                            "apellidos":"Luna","dni":"22000001"},
+                 "perfil":{"fechaNacimiento":"2010-05-12"}}""", tokenSecretaria)
+                .getResponse().getStatus());
+        assertEquals(201, crearCon("/api/v1/secretaria/apoderados", """
+                {"usuario":{"email":"apod@educa360.pe","password":"Apoderado12","nombres":"Luis",
+                            "apellidos":"Luna","dni":"22000002","telefonos":["911000111"]},
+                 "perfil":{}}""", tokenSecretaria)
+                .getResponse().getStatus());
+
+        // ...mientras que un docente no da de alta a nadie
+        String tokenDocente = altaYToken("/api/v1/admin/docentes",
+                docenteBody("profe@educa360.pe", "22000003"), "profe@educa360.pe", "Docente1234");
+        assertEquals(403, crearCon("/api/v1/secretaria/estudiantes", """
+                {"usuario":{"email":"otra@educa360.pe","password":"Alumno1234","nombres":"Alma",
+                            "apellidos":"Luna","dni":"22000004"},
+                 "perfil":{"fechaNacimiento":"2010-05-12"}}""", tokenDocente)
+                .getResponse().getStatus());
+    }
+
+    @Test
+    @DisplayName("Sólo ADMIN puede gestionar usuarios y dar de alta el personal")
+    void rbacDelModulo() throws Exception {
+        String tokenEstudiante = crearYTokenearEstudiante();
+
+        assertEquals(401, mockMvc.perform(get(USUARIOS)).andReturn().getResponse().getStatus());
+        assertEquals(403, mockMvc.perform(get(USUARIOS).header("Authorization", "Bearer " + tokenEstudiante))
                 .andReturn().getResponse().getStatus());
-        assertEquals(200, mockMvc.perform(get(RUTA).header("Authorization", "Bearer " + admin))
+        assertEquals(403, mockMvc.perform(post("/api/v1/admin/docentes")
+                        .contentType(MediaType.APPLICATION_JSON).content(docenteBody("nadie@educa360.pe", "99999999"))
+                        .header("Authorization", "Bearer " + tokenEstudiante))
+                .andReturn().getResponse().getStatus(),
+                "un estudiante no puede dar de alta docentes");
+        assertEquals(200, mockMvc.perform(get(USUARIOS).header("Authorization", "Bearer " + admin))
                 .andReturn().getResponse().getStatus());
     }
 
@@ -157,14 +235,15 @@ class UsuarioApiTest {
     @Test
     @DisplayName("El listado filtra por rol")
     void listarFiltraPorRol() throws Exception {
-        assertEquals(201, crear(docenteBody("docf@educa360.pe", "50000001"), admin).getResponse().getStatus());
-        assertEquals(201, crear(estudianteBody("aluf@educa360.pe", "50000002"), admin).getResponse().getStatus());
+        assertEquals(201, crear("/api/v1/admin/docentes", docenteBody("docf@educa360.pe", "50000001"))
+                .getResponse().getStatus());
+        assertEquals(201, crear("/api/v1/secretaria/estudiantes", """
+                {"usuario":{"email":"aluf@educa360.pe","password":"Alumno1234","nombres":"Alma",
+                            "apellidos":"Luna","dni":"50000002"},
+                 "perfil":{"fechaNacimiento":"2010-05-12"}}""").getResponse().getStatus());
 
-        MvcResult docentes = mockMvc.perform(get(RUTA + "?rol=DOCENTE")
-                        .header("Authorization", "Bearer " + admin))
-                .andReturn();
-        MvcResult todos = mockMvc.perform(get(RUTA).header("Authorization", "Bearer " + admin))
-                .andReturn();
+        MvcResult docentes = conToken(get(USUARIOS + "?rol=DOCENTE"), admin);
+        MvcResult todos = conToken(get(USUARIOS), admin);
 
         String cuerpoDocentes = docentes.getResponse().getContentAsString();
         assertTrue(cuerpoDocentes.contains("docf@educa360.pe"));
@@ -175,9 +254,7 @@ class UsuarioApiTest {
     @Test
     @DisplayName("Usuario inexistente: 404")
     void obtenerInexistenteResponde404() throws Exception {
-        MvcResult resultado = mockMvc.perform(get(RUTA + "/999")
-                        .header("Authorization", "Bearer " + admin))
-                .andReturn();
+        MvcResult resultado = conToken(get(USUARIOS + "/999"), admin);
 
         assertEquals(404, resultado.getResponse().getStatus());
     }
@@ -187,12 +264,12 @@ class UsuarioApiTest {
     @Test
     @DisplayName("La baja lógica corta el acceso al instante")
     void darDeBajaImpideElLogin() throws Exception {
-        String body = """
-                {"email":"baja@educa360.pe","password":"Baja12345","nombres":"Berta","apellidos":"Gil",
-                 "dni":"60000001","rol":"SECRETARIA","telefonos":["911222333"]}""";
-        long id = idDe(crear(body, admin));
+        long id = idDe(crear("/api/v1/admin/secretarias", """
+                {"usuario":{"email":"baja@educa360.pe","password":"Baja12345","nombres":"Berta",
+                            "apellidos":"Gil","dni":"60000001","telefonos":["911222333"]},
+                 "perfil":{}}"""));
 
-        assertEquals(200, mockMvc.perform(patch(RUTA + "/" + id + "/activo")
+        assertEquals(200, mockMvc.perform(patch(USUARIOS + "/" + id + "/activo")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"activo\":false}")
                         .header("Authorization", "Bearer " + admin))
@@ -205,30 +282,29 @@ class UsuarioApiTest {
     @Test
     @DisplayName("El ADMIN puede resetear la contraseña y el usuario entra con la nueva")
     void restablecerPassword() throws Exception {
-        String body = """
-                {"email":"clave@educa360.pe","password":"Original123","nombres":"Carla","apellidos":"Vega",
-                 "dni":"70000001","rol":"DOCENTE"}""";
-        long id = idDe(crear(body, admin));
+        long id = idDe(crear("/api/v1/admin/docentes", docenteBody("clave@educa360.pe", "70000001")));
 
-        assertEquals(200, login("clave@educa360.pe", "Original123")); // la contraseña inicial sí sirve
-        mockMvc.perform(patch(RUTA + "/" + id + "/password")
+        assertEquals(200, login("clave@educa360.pe", "Docente1234")); // la inicial sí sirve
+        mockMvc.perform(patch(USUARIOS + "/" + id + "/password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"password\":\"NuevaClave123\"}")
                         .header("Authorization", "Bearer " + admin))
                 .andReturn();
-        assertEquals(401, login("clave@educa360.pe", "Original123"), "la vieja ya no sirve tras el reset");
+        assertEquals(401, login("clave@educa360.pe", "Docente1234"), "la vieja ya no sirve tras el reset");
         assertEquals(200, login("clave@educa360.pe", "NuevaClave123"));
     }
 
     @Test
-    @DisplayName("Actualizar reemplaza los teléfonos (lista vacía = ninguno)")
-    void actualizarReemplazaTelefonos() throws Exception {
-        long id = idDe(crear(docenteBody("edit@educa360.pe", "80000001"), admin));
+    @DisplayName("Actualizar reemplaza los teléfonos y edita el perfil del rol")
+    void actualizarReemplazaTelefonosYPerfil() throws Exception {
+        long id = idDe(crear("/api/v1/admin/docentes", docenteBody("edit@educa360.pe", "80000001")));
 
         String cuerpo = actualizar(id, """
-                {"nombres":"Dana Editada","apellidos":"Perez","telefonos":["987111222","987333444"]}""");
+                {"nombres":"Dana Editada","apellidos":"Perez",
+                 "telefonos":["987111222","987333444"],"titulo":"Maestría en Educación"}""");
         assertTrue(cuerpo.contains("987111222") && cuerpo.contains("987333444"));
         assertTrue(cuerpo.contains("Dana Editada"));
+        assertTrue(cuerpo.contains("Maestría en Educación"), "el título del perfil se actualiza");
 
         String vacio = actualizar(id, """
                 {"nombres":"Dana Editada","apellidos":"Perez","telefonos":[]}""");
@@ -237,16 +313,32 @@ class UsuarioApiTest {
 
     // ==================== Helpers ====================
 
-    private MvcResult crear(String body, String token) throws Exception {
-        return mockMvc.perform(post(RUTA)
+    private MvcResult crear(String url, String body) throws Exception {
+        return crearCon(url, body, admin);
+    }
+
+    private MvcResult crearCon(String url, String body, String token) throws Exception {
+        return mockMvc.perform(post(url)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body)
                         .header("Authorization", "Bearer " + token))
                 .andReturn();
     }
 
+    /** Da de alta una cuenta (como ADMIN) y devuelve su token de login. */
+    private String altaYToken(String url, String body, String email, String password) throws Exception {
+        MvcResult creado = crearCon(url, body, admin);
+        assertEquals(201, creado.getResponse().getStatus(),
+                "no se pudo crear: " + creado.getResponse().getContentAsString());
+        return loginYToken(email, password);
+    }
+
+    private MvcResult conToken(MockHttpServletRequestBuilder peticion, String token) throws Exception {
+        return mockMvc.perform(peticion.header("Authorization", "Bearer " + token)).andReturn();
+    }
+
     private String actualizar(Long id, String body) throws Exception {
-        MvcResult resultado = mockMvc.perform(put(RUTA + "/" + id)
+        MvcResult resultado = mockMvc.perform(put(USUARIOS + "/" + id)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body)
                         .header("Authorization", "Bearer " + admin))
@@ -261,40 +353,27 @@ class UsuarioApiTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"email":"admin@educa360.pe","password":"Admin12345","nombres":"Ana",
-                                 "apellidos":"Ruiz","dni":"10000001","rol":"ADMIN"}"""))
+                                 "apellidos":"Ruiz","dni":"10000001"}"""))
                 .andReturn();
         assertEquals(201, resultado.getResponse().getStatus());
         return tokenDe(resultado.getResponse().getContentAsString());
     }
 
-    /** Crea un usuario (como ADMIN) y devuelve su token, para probar RBAC. */
-    private String crearYTokenear(String body) throws Exception {
-        MvcResult creado = crear(body, admin);
-        assertEquals(201, creado.getResponse().getStatus(),
-                "no se pudo crear: " + creado.getResponse().getContentAsString());
-        Matcher matcher = Pattern.compile("\"email\":\"([^\"]+)\"")
-                .matcher(creado.getResponse().getContentAsString());
-        assertTrue(matcher.find());
-        return loginYToken(matcher.group(1), passwordDe(body));
+    /** Da de alta un estudiante (como ADMIN) y devuelve su token, para probar RBAC. */
+    private String crearYTokenearEstudiante() throws Exception {
+        return altaYToken("/api/v1/secretaria/estudiantes", """
+                {"usuario":{"email":"alu3@educa360.pe","password":"Alumno1234","nombres":"Alma",
+                            "apellidos":"Luna","dni":"30000003"},
+                 "perfil":{"fechaNacimiento":"2011-03-03"}}""", "alu3@educa360.pe", "Alumno1234");
     }
 
+    /** Cuerpo de alta de docente: {"usuario": {...}, "perfil": {...}}. */
     private String docenteBody(String email, String dni) {
         return """
-                {"email":"%s","password":"Docente1234","nombres":"Dana","apellidos":"Perez",
-                 "dni":"%s","rol":"DOCENTE","titulo":"Lic. en Matematicas","telefonos":["987654321"]}
+                {"usuario":{"email":"%s","password":"Docente1234","nombres":"Dana","apellidos":"Perez",
+                            "dni":"%s","telefonos":["987654321"]},
+                 "perfil":{"titulo":"Lic. en Matematicas"}}
                 """.formatted(email, dni);
-    }
-
-    private String estudianteBody(String email, String dni) {
-        return """
-                {"email":"%s","password":"Alumno1234","nombres":"Alma","apellidos":"Luna",
-                 "dni":"%s","rol":"ESTUDIANTE","fechaNacimiento":"2010-05-12"}
-                """.formatted(email, dni);
-    }
-
-    private String passwordDe(String body) {
-        Matcher matcher = Pattern.compile("\"password\":\"([^\"]+)\"").matcher(body);
-        return matcher.find() ? matcher.group(1) : null;
     }
 
     private int login(String email, String password) throws Exception {
