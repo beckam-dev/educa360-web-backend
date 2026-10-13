@@ -13,10 +13,10 @@ import java.util.List;
 
 /**
  * Materia = "lo que se enseña" (catálogo institucional: Matemática, Física...).
- * No lleva sección ni docente: eso vive en {@link AsignacionDocenteService}.
+ * No lleva sección ni docente: eso vive en {@link CursoService}.
  *
- * Desactivar una materia ({@code activa=false}) sólo impide NUEVAS asignaciones;
- * las existentes se conservan — es un botón de "ya no la damos más", no de borrado.
+ * Desactivar una materia ({@code activa=false}) sólo impide crear cursos nuevos;
+ * los existentes se conservan — es un botón de "ya no la damos más", no de borrado.
  */
 @Service
 public class MateriaService {
@@ -51,7 +51,7 @@ public class MateriaService {
         return MateriaResponse.desde(materiaRepository.save(materia));
     }
 
-    /** Activar / desactivar: alterna el flag que consulta AsignacionDocenteService. */
+    /** Activar / desactivar: alterna el flag que consulta CursoService. */
     @Transactional
     public MateriaResponse cambiarActiva(Long id, boolean activa) {
         Materia materia = buscar(id);

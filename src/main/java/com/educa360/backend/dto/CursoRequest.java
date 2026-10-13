@@ -3,10 +3,11 @@ package com.educa360.backend.dto;
 import jakarta.validation.constraints.NotNull;
 
 /**
- * Alta de una asignación docente: qué docente enseña qué materia en qué sección.
- * El período NO se pide: viene dado por la sección.
+ * Alta de un curso: qué docente enseña qué materia en qué sección.
+ * El período NO se pide: viene dado por la sección. El horario se configura
+ * después, con PUT /admin/cursos/{id}/horario.
  */
-public record AsignacionRequest(
+public record CursoRequest(
         @NotNull(message = "El docente es obligatorio")
         Long docenteId,
 

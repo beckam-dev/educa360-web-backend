@@ -44,7 +44,7 @@ public class Seccion extends Auditable {
     @JoinColumn(name = "tutor_id")
     private Docente tutor;
 
-    // La sección pertenece a UN período (por eso AsignacionDocente no repite periodo).
+    // La sección pertenece a UN período (por eso Curso no repite periodo).
     @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "periodo_id", nullable = false)
     private PeriodoAcademico periodo;

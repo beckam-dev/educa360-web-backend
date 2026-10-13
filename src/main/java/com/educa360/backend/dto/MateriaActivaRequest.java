@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotNull;
 
 /**
  * Activar / desactivar una materia ({"activa": false}).
- * Desactivarla impide NUEVAS asignaciones docentes; las existentes se conservan.
+ * Desactivarla impide NUEVOS cursos; los existentes se conservan.
  */
 public record MateriaActivaRequest(
         @NotNull(message = "El estado activa/inactiva es obligatorio")

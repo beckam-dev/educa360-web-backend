@@ -21,7 +21,7 @@ import java.util.List;
  * (Docente.materias → join table docente_materia).
  *
  * La habilitación contesta "qué materias PUEDE enseñar"; cuáles enseña
- * realmente en un período lo decide {@link AsignacionDocenteService},
+ * realmente en un período lo decide {@link CursoService},
  * que exige la habilitación como prerrequisito.
  */
 @Service

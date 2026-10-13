@@ -16,7 +16,7 @@ import java.util.List;
  * Catálogo de materias (exclusivo de ADMIN).
  *
  * Materia = "lo que se enseña" (Matemática, Física...) — sin sección ni docente.
- * PATCH /{id}/activa la archiva sin borrar: impide nuevas asignaciones,
+ * PATCH /{id}/activa la archiva sin borrar: impide crear cursos nuevos,
  * las existentes se conservan.
  */
 @RestController
@@ -46,7 +46,7 @@ public class MateriaController {
         return ResponseEntity.ok(materiaService.actualizar(id, request));
     }
 
-    /** {"activa": true|false} — el archivado que consulta el alta de asignaciones. */
+    /** {"activa": true|false} — el archivado que consulta el alta de cursos. */
     @PatchMapping("/{id}/activa")
     public ResponseEntity<MateriaResponse> cambiarActiva(
             @PathVariable Long id, @Valid @RequestBody MateriaActivaRequest request) {

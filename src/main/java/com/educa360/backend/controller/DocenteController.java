@@ -46,7 +46,7 @@ public class DocenteController {
                 .body(docenteService.crear(body.usuario(), body.perfil()));
     }
 
-    // Habilitaciones de materia: "qué puede enseñar" (el Módulo de asignaciones lo exige)
+    // Habilitaciones de materia: "qué puede enseñar" (el alta de cursos lo exige)
 
     @GetMapping("/{id}/materias")
     public ResponseEntity<List<MateriaResponse>> listarMaterias(@PathVariable Long id) {

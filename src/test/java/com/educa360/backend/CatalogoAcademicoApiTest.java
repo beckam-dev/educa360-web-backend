@@ -1,9 +1,10 @@
 package com.educa360.backend;
 
-import com.educa360.backend.repository.AsignacionDocenteRepository;
 import com.educa360.backend.repository.ApoderadoRepository;
+import com.educa360.backend.repository.CursoRepository;
 import com.educa360.backend.repository.DocenteRepository;
 import com.educa360.backend.repository.EstudianteRepository;
+import com.educa360.backend.repository.HorarioBloqueRepository;
 import com.educa360.backend.repository.MateriaRepository;
 import com.educa360.backend.repository.PeriodoAcademicoRepository;
 import com.educa360.backend.repository.SeccionRepository;
@@ -40,14 +41,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 /**
  * Tests del Módulo 2: catálogo académico (períodos, materias, secciones,
- * habilitaciones y asignaciones docentes).
+ * habilitaciones, cursos y horarios).
  *
  * Reglas que protege el suite:
  * - sólo UN período ABIERTO a la vez;
  * - "grado+letra" único por período (secundaria: grado 1..5);
- * - única asignación por (materia, sección);
- * - sin habilitación previa del docente no se asigna;
- * - materia desactivada frena nuevas asignaciones.
+ * - único curso por (materia, sección);
+ * - sin habilitación previa del docente no se crea el curso;
+ * - materia desactivada frena nuevos cursos;
+ * - el horario no solapa a la sección ni al docente.
  *
  * PostgreSQL efímera (Testcontainers): no toca la BD de desarrollo.
  */
@@ -71,7 +73,7 @@ class CatalogoAcademicoApiTest {
     private static final String PERIODOS = "/api/v1/admin/periodos";
     private static final String MATERIAS = "/api/v1/admin/materias";
     private static final String SECCIONES = "/api/v1/admin/secciones";
-    private static final String ASIGNACIONES = "/api/v1/admin/asignaciones";
+    private static final String CURSOS = "/api/v1/admin/cursos";
 
     @Autowired
     private MockMvc mockMvc;
@@ -92,7 +94,10 @@ class CatalogoAcademicoApiTest {
     private SeccionRepository seccionRepository;
 
     @Autowired
-    private AsignacionDocenteRepository asignacionRepository;
+    private CursoRepository cursoRepository;
+
+    @Autowired
+    private HorarioBloqueRepository horarioRepository;
 
     @Autowired
     private EstudianteRepository estudianteRepository;
@@ -108,7 +113,8 @@ class CatalogoAcademicoApiTest {
     @BeforeEach
     void empezarDeCero() throws Exception {
         // Orden de borrado por las FK: lo hijo primero
-        asignacionRepository.deleteAll();
+        horarioRepository.deleteAll();
+        cursoRepository.deleteAll();
         seccionRepository.deleteAll();
         docenteRepository.deleteAll(); // con ella se van las filas de la join docente_materia
         materiaRepository.deleteAll();
@@ -249,26 +255,23 @@ class CatalogoAcademicoApiTest {
         assertEquals(404, habilitar(docente, "[999]"), "materia inexistente");
     }
 
-    // ==================== Asignaciones docentes ====================
+    // ==================== Cursos ====================
 
     @Test
-    @DisplayName("Asignar a un docente SIN la materia habilitada responde 409")
-    void asignarSinHabilitacionResponde409() throws Exception {
+    @DisplayName("Crear un curso para un docente SIN la materia habilitada responde 409")
+    void cursoSinHabilitacionResponde409() throws Exception {
         long docente = crearDocente("doc1@educa360.pe", "20000011");
         long matematicas = crearMateria("Matematicas");
         long periodo = crearPeriodo("2026", "2026-03-02", "2026-12-18");
         long seccion = nuevaSeccion(1, "A", periodo);
 
-        MvcResult resultado = crear(ASIGNACIONES, """
-                {"docenteId":%d,"materiaId":%d,"seccionId":%d}""".formatted(docente, matematicas, seccion));
-
-        assertEquals(409, resultado.getResponse().getStatus(),
-                "sin habilitación previa no se asigna: " + resultado.getResponse().getContentAsString());
+        assertEquals(409, curso(docente, matematicas, seccion),
+                "sin habilitación previa no se crea el curso");
     }
 
     @Test
-    @DisplayName("Una materia sólo tiene UN docente por sección (409 al repetir)")
-    void asignacionUnicaPorMateriaYSeccion() throws Exception {
+    @DisplayName("Una materia sólo puede tener UN curso por sección (409 al repetir)")
+    void cursoUnicoPorMateriaYSeccion() throws Exception {
         long dana = crearDocente("doc1@educa360.pe", "20000011");
         long elva = crearDocente("doc2@educa360.pe", "20000012");
         long matematicas = crearMateria("Matematicas");
@@ -279,16 +282,16 @@ class CatalogoAcademicoApiTest {
         habilitar(dana, "[%d,%d]".formatted(matematicas, fisica));
         habilitar(elva, "[%d]".formatted(fisica));
 
-        assertEquals(201, asignar(dana, matematicas, seccion));
-        assertEquals(409, asignar(dana, matematicas, seccion), "misma materia y sección");
+        assertEquals(201, curso(dana, matematicas, seccion));
+        assertEquals(409, curso(dana, matematicas, seccion), "misma materia y sección");
 
-        assertEquals(201, asignar(elva, fisica, seccion), "otra materia en la misma sección sí");
-        assertEquals(409, asignar(dana, fisica, seccion), "la materia ya tiene docente en esa sección");
+        assertEquals(201, curso(elva, fisica, seccion), "otra materia en la misma sección sí");
+        assertEquals(409, curso(dana, fisica, seccion), "la materia ya tiene curso en esa sección");
     }
 
     @Test
-    @DisplayName("Una materia desactivada frena NUEVAS asignaciones")
-    void materiaDesactivadaBloqueaNuevasAsignaciones() throws Exception {
+    @DisplayName("Una materia desactivada frena NUEVOS cursos")
+    void materiaDesactivadaBloqueaNuevosCursos() throws Exception {
         long dana = crearDocente("doc1@educa360.pe", "20000011");
         long matematicas = crearMateria("Matematicas");
         long periodo = crearPeriodo("2026", "2026-03-02", "2026-12-18");
@@ -296,32 +299,110 @@ class CatalogoAcademicoApiTest {
         long seccion4B = nuevaSeccion(4, "B", periodo);
         habilitar(dana, "[%d]".formatted(matematicas));
 
-        assertEquals(201, asignar(dana, matematicas, seccion3A), "habilitada y activa: pasa");
+        assertEquals(201, curso(dana, matematicas, seccion3A), "habilitada y activa: pasa");
 
         MvcResult desactivada = conToken(patch(MATERIAS + "/" + matematicas + "/activa")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"activa\":false}"), admin);
         assertEquals(200, desactivada.getResponse().getStatus());
 
-        assertEquals(409, asignar(dana, matematicas, seccion4B),
-                "reactivar la materia antes de asignarla de nuevo");
+        assertEquals(409, curso(dana, matematicas, seccion4B),
+                "reactivar la materia antes de crear el curso");
     }
 
     @Test
-    @DisplayName("Eliminar una asignación y repetir el borrado responde 404")
-    void eliminarAsignacionYRepetirResponde404() throws Exception {
+    @DisplayName("Eliminar un curso y repetir el borrado responde 404")
+    void eliminarCursoYRepetirResponde404() throws Exception {
         long dana = crearDocente("doc1@educa360.pe", "20000011");
         long matematicas = crearMateria("Matematicas");
         long periodo = crearPeriodo("2026", "2026-03-02", "2026-12-18");
         long seccion = nuevaSeccion(1, "A", periodo);
         habilitar(dana, "[%d]".formatted(matematicas));
-        long asignacion = nuevaAsignacion(dana, matematicas, seccion);
+        long cursoId = nuevoCurso(dana, matematicas, seccion);
 
-        MvcResult borrado = conToken(delete(ASIGNACIONES + "/" + asignacion), admin);
+        MvcResult borrado = conToken(delete(CURSOS + "/" + cursoId), admin);
         assertEquals(204, borrado.getResponse().getStatus());
 
-        assertEquals(404, conToken(delete(ASIGNACIONES + "/" + asignacion), admin)
+        assertEquals(404, conToken(delete(CURSOS + "/" + cursoId), admin)
                 .getResponse().getStatus(), "ya no existe");
+    }
+
+    // ==================== Horario ====================
+
+    @Test
+    @DisplayName("El horario se pinta por hoja entera: el PUT reemplaza los bloques")
+    void horarioReemplazaLaHojaEntera() throws Exception {
+        long cursoId = cursoDeUnDocente("doc1@educa360.pe", "20000011", "Matematicas");
+
+        assertEquals(200, putHorario(cursoId, """
+                {"bloques":[{"dia":"LUNES","horaInicio":"08:00","horaFin":"09:00"},
+                             {"dia":"MARTES","horaInicio":"08:00","horaFin":"09:00"}]}"""));
+        String dos = getHorario(cursoId);
+        assertTrue(dos.contains("LUNES") && dos.contains("MARTES"));
+
+        assertEquals(200, putHorario(cursoId, """
+                {"bloques":[{"dia":"LUNES","horaInicio":"10:00","horaFin":"11:00"}]}"""));
+        String uno = getHorario(cursoId);
+        assertTrue(uno.contains("10:00"));
+        assertFalse(uno.contains("MARTES"), "los bloques que no vinieron se quitan");
+    }
+
+    @Test
+    @DisplayName("Dos cursos de la MISMA sección no pueden solaparse (409)")
+    void solapeEnLaSeccionResponde409() throws Exception {
+        long dana = crearDocente("doc1@educa360.pe", "20000011");
+        long elva = crearDocente("doc2@educa360.pe", "20000012");
+        long matematicas = crearMateria("Matematicas");
+        long fisica = crearMateria("Fisica");
+        long periodo = crearPeriodo("2026", "2026-03-02", "2026-12-18");
+        long seccion = nuevaSeccion(3, "A", periodo);
+        habilitar(dana, "[%d]".formatted(matematicas));
+        habilitar(elva, "[%d]".formatted(fisica));
+        long cursoMatematicas = nuevoCurso(dana, matematicas, seccion);
+        long cursoFisica = nuevoCurso(elva, fisica, seccion);
+
+        assertEquals(200, putHorario(cursoMatematicas, """
+                {"bloques":[{"dia":"LUNES","horaInicio":"08:00","horaFin":"09:00"}]}"""));
+        assertEquals(409, putHorario(cursoFisica, """
+                {"bloques":[{"dia":"LUNES","horaInicio":"08:30","horaFin":"09:30"}]}"""),
+                "la sección ya está ocupada a esa hora");
+        assertEquals(200, putHorario(cursoFisica, """
+                {"bloques":[{"dia":"LUNES","horaInicio":"09:00","horaFin":"10:00"}]}"""),
+                "consecutivo (09:00 fin / 09:00 inicio) no es solape");
+    }
+
+    @Test
+    @DisplayName("El mismo docente no puede estar en dos cursos a la misma hora (409)")
+    void solapeEnElDocenteResponde409() throws Exception {
+        long dana = crearDocente("doc1@educa360.pe", "20000011");
+        long matematicas = crearMateria("Matematicas");
+        long periodo = crearPeriodo("2026", "2026-03-02", "2026-12-18");
+        long seccion3A = nuevaSeccion(3, "A", periodo);
+        long seccion4B = nuevaSeccion(4, "B", periodo);
+        habilitar(dana, "[%d]".formatted(matematicas));
+        long en3A = nuevoCurso(dana, matematicas, seccion3A);
+        long en4B = nuevoCurso(dana, matematicas, seccion4B); // misma materia, otra sección: permitido
+
+        assertEquals(200, putHorario(en3A, """
+                {"bloques":[{"dia":"MARTES","horaInicio":"10:00","horaFin":"11:00"}]}"""));
+        assertEquals(409, putHorario(en4B, """
+                {"bloques":[{"dia":"MARTES","horaInicio":"10:30","horaFin":"11:30"}]}"""),
+                "el docente no puede dar dos clases a la vez");
+        assertEquals(200, putHorario(en4B, """
+                {"bloques":[{"dia":"MARTES","horaInicio":"11:00","horaFin":"12:00"}]}"""));
+    }
+
+    @Test
+    @DisplayName("Bloque con horas invertidas o día inválido responde 400")
+    void horarioInvalidoResponde400() throws Exception {
+        long cursoId = cursoDeUnDocente("doc1@educa360.pe", "20000011", "Matematicas");
+
+        assertEquals(400, putHorario(cursoId, """
+                {"bloques":[{"dia":"LUNES","horaInicio":"09:00","horaFin":"08:00"}]}"""),
+                "fin antes que inicio");
+        assertEquals(400, putHorario(cursoId, """
+                {"bloques":[{"dia":"DOMINGO","horaInicio":"08:00","horaFin":"09:00"}]}"""),
+                "día fuera del enum");
     }
 
     // ==================== RBAC ====================
@@ -414,19 +495,41 @@ class CatalogoAcademicoApiTest {
                 .getResponse().getContentAsString();
     }
 
-    /** POST de asignación; devuelve el status (para expectativas 201/409). */
-    private int asignar(long docenteId, long materiaId, long seccionId) throws Exception {
-        return crear(ASIGNACIONES, """
+    /** POST de curso; devuelve el status (para expectativas 201/409). */
+    private int curso(long docenteId, long materiaId, long seccionId) throws Exception {
+        return crear(CURSOS, """
                 {"docenteId":%d,"materiaId":%d,"seccionId":%d}"""
                 .formatted(docenteId, materiaId, seccionId))
                 .getResponse().getStatus();
     }
 
-    /** POST de asignación que exige 201 y devuelve el id. */
-    private long nuevaAsignacion(long docenteId, long materiaId, long seccionId) throws Exception {
-        return idDe(crear(ASIGNACIONES, """
+    /** POST de curso que exige 201 y devuelve el id. */
+    private long nuevoCurso(long docenteId, long materiaId, long seccionId) throws Exception {
+        return idDe(crear(CURSOS, """
                 {"docenteId":%d,"materiaId":%d,"seccionId":%d}"""
                 .formatted(docenteId, materiaId, seccionId)));
+    }
+
+    /** Monta el camino completo y devuelve el curso: docente + habilitación + materia + sección. */
+    private long cursoDeUnDocente(String email, String dni, String materia) throws Exception {
+        long docente = crearDocente(email, dni);
+        long materiaId = crearMateria(materia);
+        long periodo = crearPeriodo("2026", "2026-03-02", "2026-12-18");
+        long seccion = nuevaSeccion(3, "A", periodo);
+        habilitar(docente, "[%d]".formatted(materiaId));
+        return nuevoCurso(docente, materiaId, seccion);
+    }
+
+    private int putHorario(long cursoId, String body) throws Exception {
+        return conToken(put(CURSOS + "/" + cursoId + "/horario")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body), admin)
+                .getResponse().getStatus();
+    }
+
+    private String getHorario(long cursoId) throws Exception {
+        return conToken(get(CURSOS + "/" + cursoId + "/horario"), admin)
+                .getResponse().getContentAsString();
     }
 
     /** Id de un recurso recién creado: exige que la creación haya sido 201. */

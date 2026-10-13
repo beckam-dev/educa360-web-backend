@@ -3,25 +3,25 @@ package com.educa360.backend.entity;
 import jakarta.persistence.*;
 
 /**
- * Quién enseña qué a quién en un período: en el lenguaje del colegio esto es
- * "el curso" ("Matemática de 3°A, con el profe X").
+ * Curso: la oferta concreta de un período — en el lenguaje del colegio,
+ * "el curso" (Matemática de 3°A, con el profe X).
  *
- * NO existe entidad Curso: la asignación YA ES el curso concreto de un
- * período — la sección trae el periodo dentro, y una entidad intermedia
- * sólo sería un intermediario sin comportamiento propio.
+ * Antes llamada AsignacionDocente: el nombre describía la acción de asignar;
+ * ahora la clase es la identidad que cuelgan asistencia, notas y materiales,
+ * y que además carga su horario (1:N con {@link HorarioBloque}).
  *
- * Sin horario por ahora: si algún día hace falta asistencia por bloque,
- * el horario se añade aquí (día + hora) con sus reglas de solape.
+ * No es un alias de {@link Materia}: la materia es el catálogo ("lo que se
+ * enseña"), el curso es la instancia de un período, en una sección, con docente.
  *
- * REGLAS (viven en AsignacionDocenteService):
+ * REGLAS (en CursoService):
  * - única por (materia, sección): nadie más da Matemáticas en 3°A;
  * - el docente debe tener la materia habilitada (Docente.materias);
  * - la materia debe estar activa.
  */
 @Entity
-@Table(name = "asignaciones_docentes",
+@Table(name = "cursos",
         uniqueConstraints = @UniqueConstraint(columnNames = {"materia_id", "seccion_id"}))
-public class AsignacionDocente extends Auditable {
+public class Curso extends Auditable {
 
     @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "docente_id", nullable = false)
@@ -37,10 +37,10 @@ public class AsignacionDocente extends Auditable {
 
     // Constructors
 
-    public AsignacionDocente() {
+    public Curso() {
     }
 
-    public AsignacionDocente(Docente docente, Materia materia, Seccion seccion) {
+    public Curso(Docente docente, Materia materia, Seccion seccion) {
         this();
         this.docente = docente;
         this.materia = materia;
@@ -77,7 +77,7 @@ public class AsignacionDocente extends Auditable {
 
     @Override
     public String toString() {
-        return "AsignacionDocente{" +
+        return "Curso{" +
                 "id=" + getId() +
                 ", docenteId=" + (docente != null ? docente.getId() : null) +
                 ", materiaId=" + (materia != null ? materia.getId() : null) +

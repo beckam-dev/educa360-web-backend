@@ -25,7 +25,7 @@
   - `security`: `SecurityConfig` (SecurityFilterChain + CORS), `JwtService`, `JwtAuthenticationFilter`, `AppUserDetailsService`.
   - `service`: `AuthService` (login, registro, `/me`) y `LoginAttemptService` (límite de intentos de login).
   - `exception`: `GlobalExceptionHandler` (`@RestControllerAdvice`), `ApiError`, `ConflictException` (409) y `RateLimitedException` (429).
-- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 57 tests, ejecutados por el CI (GitHub Actions) en cada push.
+- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 61 tests, ejecutados por el CI (GitHub Actions) en cada push.
 - **Entorno:** Docker Compose (`docker compose up -d` → Postgres + backend). Los secretos viven en `.env` (no versionado; su plantilla vacía es `.env.example`) y el backend **no arranca** sin `APP_JWT_SECRET`. Postgres sólo escucha en `127.0.0.1`.
 
 ---
@@ -83,12 +83,13 @@
 5. ✅ `Seccion`:
    - `id`, `grado` (acotado a **1..5**: el sistema es sólo secundaria, sin campo `nivel`), `letra` (mayúscula), `aula` (texto libre, p. ej. "A-101" — **sin entidad `Aula`**; se extraerá como tabla si aparecen capacidad u horarios), `tutorId` (docente opcional), `periodoId`.
    - **Regla:** `grado+letra` es único DENTRO de un período — las secciones se re-forman cada período (así asistencia y matrícula quedan acotadas al período sin columnas extra).
-6. ✅ `AsignacionDocente` / 📋 `Matricula`:
-   - `AsignacionDocente`: cruce docente × materia × sección (el período viene en la sección). **No existe entidad `Curso`: la asignación ES "el curso" del colegio** (Matemática · 3°A · profe X) — un `Curso` aparte sería un intermediario sin comportamiento. Única por (materia, sección); exige materia habilitada al docente y materia activa.
+6. ✅ `Curso` (antes `AsignacionDocente`) / 📋 `Matricula`:
+   - `Curso`: la oferta concreta del período — docente × materia × sección. **Es "el curso" del colegio** (Matemática · 3°A · profe X); `Materia` es el catálogo ("lo que se enseña") y el `Curso` su instancia concreta. Único por (materia, sección); exige materia habilitada al docente y materia activa. El nombre anterior describía la *acción* de asignar; la clase ahora es la identidad que cuelgan asistencia, notas y materiales, y que carga su horario.
+   - ✅ `HorarioBloque` (del curso): `cursoId`, `dia` (`LUNES`..`SABADO`), `horaInicio`, `horaFin` — sesión **semanal recurrente** (1:N: un curso se ve varias veces por semana). Sin solapes por sección ni por docente el mismo día.
    - **Limitación de alcance:** no se implementará un módulo completo de matrículas. La `Matricula` se modela como un registro con estados (ej. `PENDIENTE`, `PAGADO`) gestionados por `SECRETARIA` y actualizados por reglas automáticas del sistema.
 7. 📋 `Asistencia`:
-   - `id`, `estudianteId`, `seccionId`, `fecha`, `estado` (`PRESENTE`, `TARDANZA`, `FALTA`, `JUSTIFICADA`), `observacion`.
-   - La asistencia diaria la toma el tutor por sección; el modo "por bloque" llegará con el horario (diferido).
+   - `id`, `estudianteId`, `bloqueId` (el `HorarioBloque` del curso), `fecha`, `estado` (`PRESENTE`, `TARDANZA`, `FALTA`, `JUSTIFICADA`), `observacion`.
+   - Se toma **por sesión (bloque)**: el tutor registra a su grupo en el bloque de la hora en curso — de ahí que el horario fuera indispensable.
 8. 📋 `Calificacion`:
    - `id`, `estudianteId`, `asignacionId` (materia + sección, y el período viene en la sección), `criterio/competencia`, `nota` (0.0 a 20.0), `fechaRegistro`.
 9. 📋 `TicketJustificacion`:
@@ -106,9 +107,9 @@
 **Hecho y probado:**
 - Autenticación y autorización: login JWT, registro con alta inicial, `/me`, RBAC por rol, límite de intentos, errores uniformes en JSON y CORS para el SPA.
 - Gestión de usuarios y perfiles: altas por rol con cuenta y perfil creados en la misma transacción, en dos zonas — personal (`/api/v1/admin/{usuarios,docentes,secretarias}`, sólo `ADMIN`) y alumnos/familias (`/api/v1/secretaria/{estudiantes,apoderados}`, `ADMIN` + `SECRETARIA`). Listado con filtros, edición, baja lógica y reseteo de contraseña en `/api/v1/admin/usuarios`. `/auth/register` queda reducido al arranque (sólo con BD vacía): un solo camino de creación, sin duplicidades.
-- Catálogo académico (Módulo 2, todo `ADMIN`): períodos (**sólo uno `ABIERTO` a la vez**, nacen `CERRADOS`), materias del catálogo (CRUD + archivar con `activa`), secciones por período (grado 1..5, `grado+letra` único por período, tutor opcional), **habilitaciones** de materia por docente (`GET|PUT /admin/docentes/{id}/materias`, el `PUT` reemplaza el conjunto) y **asignaciones docentes** (únicas por materia+sección, exigen habilitación y materia activa; baja física con `DELETE`).
-- 12 entidades: `Auditable`, `User`, `Docente`, `Estudiante`, `Apoderado`, `Secretaria`, `Materia`, `Telefono`, `ApoderadoEstudiante`, `PeriodoAcademico`, `Seccion`, `AsignacionDocente`.
-- 57 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
+- Catálogo académico (Módulo 2, todo `ADMIN`): períodos (**sólo uno `ABIERTO` a la vez**, nacen `CERRADOS`), materias del catálogo (CRUD + archivar con `activa`), secciones por período (grado 1..5, `grado+letra` único por período, tutor opcional), **habilitaciones** de materia por docente (`GET|PUT /admin/docentes/{id}/materias`, el `PUT` reemplaza el conjunto), **cursos** (`GET|POST|DELETE /admin/cursos` — únicos por materia+sección, exigen habilitación y materia activa; baja física) y su **horario** (`GET|PUT /admin/cursos/{id}/horario`: bloques semanales sin solapes por sección ni por docente).
+- 13 entidades: `Auditable`, `User`, `Docente`, `Estudiante`, `Apoderado`, `Secretaria`, `Materia`, `Telefono`, `ApoderadoEstudiante`, `PeriodoAcademico`, `Seccion`, `Curso`, `HorarioBloque`.
+- 61 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
 - Docker Compose (Postgres + backend) con secretos fuera de Git y `.env.example` para el equipo.
 - Documentación interactiva en Swagger: `http://localhost:8080/swagger-ui/index.html`.
 
@@ -124,7 +125,7 @@
 **Cómo se ejecuta:**
 - `docker compose up -d` → Postgres (sólo accesible en `127.0.0.1`) + backend en `http://localhost:8080`.
 - `./mvnw spring-boot:run` → desarrollo con recarga; usa el mismo Postgres de Docker.
-- `./mvnw test` → 57 tests contra una PostgreSQL efímera (requiere Docker; sin él se saltan).
+- `./mvnw test` → 61 tests contra una PostgreSQL efímera (requiere Docker; sin él se saltan).
 - Alta inicial: la primera cuenta se crea con `POST /api/v1/auth/register` (sólo con BD vacía) y queda como `ADMIN`; en cuanto hay una, ese endpoint se cierra y todo lo demás se gestiona en `/api/v1/admin/...`.
 
 ---
@@ -157,13 +158,14 @@
   - `PATCH /api/v1/admin/usuarios/{id}/password` → reseteo por `ADMIN` (no invalida los tokens ya emitidos; eso lo hace la baja).
   - Sin token `401`; sin permiso para la zona `403`.
 - **Catálogo académico (Módulo 2, exclusivo de `ADMIN`, todo bajo `/api/v1/admin/...`):**
-  - **Terminología:** `Materia` = "lo que se enseña" (catálogo: Matemática, Física); `Seccion` = el grupo de un período ("3°A"); `AsignacionDocente` = **"el curso"** del colegio (materia · sección · docente). **No existe entidad `Curso`**: sería un intermediario sin comportamiento propio — donde el roadmap decía `cursoId` ahora se usa `asignacionId` o `seccionId`.
+  - **Terminología:** `Materia` = "lo que se enseña" (catálogo: Matemática, Física); `Seccion` = el grupo de un período ("3°A"); `Curso` = la instancia del período (**antes `AsignacionDocente`** — renombrada porque "asignación" describía una acción, y la clase ahora es la identidad que cuelgan asistencia, notas y materiales). Donde el roadmap decía `cursoId` ambiguo, ahora se distingue: `cursoId` (la instancia) o `seccionId` (el grupo).
   - `GET|POST /api/v1/admin/periodos`, `PUT /{id}`, `PATCH /{id}/estado`: el período **nace `CERRADO`** y se abre a propósito (así "quién abrió y cuándo" queda claro y la regla vive en un solo método). **Sólo UNO `ABIERTO` a la vez** (`409` si ya hay otro vigente), nombre único (`409`), fin anterior a inicio (`400`).
   - `GET|POST /api/v1/admin/materias`, `PUT /{id}`, `PATCH /{id}/activa`: nombre único (`409`). `activa=false` **impide nuevas asignaciones** sin tocar las existentes — es un "ya no la damos más", no un borrado.
   - `GET|POST /api/v1/admin/secciones` (`?periodoId=`), `PUT /{id}`: grado acotado a **1..5** (sólo secundaria, sin campo `nivel`), letra en mayúscula, `aula` como **texto** (sin entidad `Aula`: se extraerá si aparecen capacidad u horarios), tutor opcional. `grado+letra` único por período (`409`) y **no se mueve de período** (`409`: se crea otra fila — arrastrarla rompería el histórico por período).
   - `GET|PUT /api/v1/admin/docentes/{id}/materias`: las **habilitaciones** del docente ("qué puede enseñar"). El `PUT` **reemplaza el conjunto completo** (misma filosofía que los teléfonos): se envía la lista entera — o vacía para dejarlo sin materias.
-  - `GET|POST /api/v1/admin/asignaciones` (`?seccionId=`, `?docenteId=`), `DELETE /{id}`: el período **no se pide** (viene de la sección). Reglas → `409`: única por (materia, sección) — nadie más da Matemáticas en 3°A —, docente sin la materia habilitada y materia desactivada. La baja es **física** (`DELETE`): es configuración del período, no histórico de personas (eso sí se desactiva, como `User.activo`).
-  - **Diferidos, con su disparador escrito:** horario (cuando la asistencia sea "por bloque" — la diaria la toma el tutor por sección), `Unidad`/contenidos (cuando las notas se agrupen por unidad) y `Aula` como entidad (si aparecen capacidad u horarios).
+  - `GET|POST /api/v1/admin/cursos` (`?seccionId=`, `?docenteId=`), `DELETE /{id}`: el período **no se pide** (viene de la sección). Reglas → `409`: único por (materia, sección) — nadie más da Matemáticas en 3°A —, docente sin la materia habilitada y materia desactivada. La baja es **física** (`DELETE`): es configuración del período, no histórico de personas (eso sí se desactiva, como `User.activo`) — y se lleva por delante su horario.
+  - `GET|PUT /api/v1/admin/cursos/{id}/horario`: el horario es **1:N** (`HorarioBloque`, sesión semanal recurrente — un curso se ve varias veces por semana). El `PUT` reemplaza la **hoja entera** (misma filosofía que las habilitaciones). Reglas → `400` si un bloque termina antes de empezar; `409` por solapes: ni con otro curso de la misma sección ni con otro del mismo docente el mismo día (los bloques consecutivos no solapan: 09:00 fin / 09:00 inicio). La asistencia futura colgará de (bloque, fecha).
+  - **Diferidos, con su disparador escrito:** `Unidad`/contenidos (cuando las notas se agrupen por unidad) y `Aula` como entidad (si aparecen capacidad u horarios institucionales). ~~Horario~~: ya implementado.
 - **Flujo de Justificaciones:**
   - Solo el apoderado puede registrar solicitudes de justificación para sus representados.
   - La `SECRETARIA` revisa el sustento; si lo aprueba, se actualiza el estado de la asistencia del estudiante de forma transaccional.
