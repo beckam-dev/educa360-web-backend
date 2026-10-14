@@ -9,7 +9,9 @@ import com.educa360.backend.dto.UsuarioBasicoRequest;
 import com.educa360.backend.dto.UserResponse;
 import com.educa360.backend.entity.User;
 import com.educa360.backend.exception.RateLimitedException;
+import com.educa360.backend.repository.ApoderadoRepository;
 import com.educa360.backend.repository.DocenteRepository;
+import com.educa360.backend.repository.EstudianteRepository;
 import com.educa360.backend.repository.UserRepository;
 import com.educa360.backend.security.JwtService;
 import org.springframework.security.access.AccessDeniedException;
@@ -30,6 +32,10 @@ public class AuthService {
     private final LoginAttemptService loginAttempts;
     private final UsuarioService usuarioService;
     private final DocenteRepository docenteRepository;
+    private final EstudianteRepository estudianteRepository;
+    private final ApoderadoRepository apoderadoRepository;
+    private final MatriculaService matriculaService;
+    private final ApoderadoService apoderadoService;
 
     public AuthService(
             UserRepository userRepository,
@@ -37,7 +43,11 @@ public class AuthService {
             JwtService jwtService,
             LoginAttemptService loginAttempts,
             UsuarioService usuarioService,
-            DocenteRepository docenteRepository
+            DocenteRepository docenteRepository,
+            EstudianteRepository estudianteRepository,
+            ApoderadoRepository apoderadoRepository,
+            MatriculaService matriculaService,
+            ApoderadoService apoderadoService
     ) {
         this.userRepository = userRepository;
         this.authenticationManager = authenticationManager;
@@ -45,6 +55,10 @@ public class AuthService {
         this.loginAttempts = loginAttempts;
         this.usuarioService = usuarioService;
         this.docenteRepository = docenteRepository;
+        this.estudianteRepository = estudianteRepository;
+        this.apoderadoRepository = apoderadoRepository;
+        this.matriculaService = matriculaService;
+        this.apoderadoService = apoderadoService;
     }
 
     /**
@@ -123,19 +137,30 @@ public class AuthService {
     }
 
     /**
-     * El perfil varía por rol: hoy sólo el DOCENTE trae datos (título y
-     * materias). El Módulo 3 añadirá la sección del ESTUDIANTE y los hijos
-     * del APODERADO; los demás roles llevan perfil null.
+     * El perfil varía por rol: DOCENTE trae título y materias; ESTUDIANTE,
+     * su sección del período vigente; APODERADO, sus hijos (Módulo 3).
+     * Los demás roles llevan perfil null.
      */
     private MePerfilResponse perfilDe(User user) {
-        if (user.getRol() != User.Role.DOCENTE) {
-            return null;
-        }
-        return docenteRepository.findByUser(user)
-                .map(docente -> new MePerfilResponse(
-                        docente.getTitulo(),
-                        docente.getMaterias().stream().map(MateriaResponse::desde).toList()))
-                .orElse(null);
+        return switch (user.getRol()) {
+            case DOCENTE -> docenteRepository.findByUser(user)
+                    .map(docente -> MePerfilResponse.docente(
+                            docente.getTitulo(),
+                            docente.getMaterias().stream().map(MateriaResponse::desde).toList()))
+                    .orElse(null);
+            case ESTUDIANTE -> estudianteRepository.findByUser(user)
+                    .flatMap(estudiante -> matriculaService.vigenteDe(estudiante.getId()))
+                    .map(matricula -> MePerfilResponse.estudiante(
+                            matricula.getSeccion().getEtiqueta(),
+                            matricula.getSeccion().getPeriodo().getNombre(),
+                            matricula.getEstado()))
+                    .orElse(null);
+            case APODERADO -> apoderadoRepository.findByUser(user)
+                    .map(apoderado -> MePerfilResponse.apoderado(
+                            apoderadoService.listarHijos(apoderado.getId())))
+                    .orElse(null);
+            case ADMIN, SECRETARIA -> null;
+        };
     }
 
     private AuthResponse buildAuthResponse(User user) {

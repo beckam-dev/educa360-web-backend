@@ -6,6 +6,7 @@ import com.educa360.backend.dto.HorarioBloqueResponse;
 import com.educa360.backend.dto.HorarioRequest;
 import com.educa360.backend.entity.Curso;
 import com.educa360.backend.entity.Docente;
+import com.educa360.backend.entity.Estudiante;
 import com.educa360.backend.entity.HorarioBloque;
 import com.educa360.backend.entity.Materia;
 import com.educa360.backend.entity.Seccion;
@@ -15,6 +16,7 @@ import com.educa360.backend.exception.ConflictException;
 import com.educa360.backend.exception.NotFoundException;
 import com.educa360.backend.repository.CursoRepository;
 import com.educa360.backend.repository.DocenteRepository;
+import com.educa360.backend.repository.EstudianteRepository;
 import com.educa360.backend.repository.HorarioBloqueRepository;
 import com.educa360.backend.repository.UserRepository;
 import org.springframework.stereotype.Service;
@@ -40,22 +42,28 @@ public class CursoService {
     private final CursoRepository cursoRepository;
     private final HorarioBloqueRepository horarioRepository;
     private final DocenteRepository docenteRepository;
+    private final EstudianteRepository estudianteRepository;
     private final UserRepository userRepository;
     private final MateriaService materiaService;
     private final SeccionService seccionService;
+    private final MatriculaService matriculaService;
 
     public CursoService(CursoRepository cursoRepository,
                         HorarioBloqueRepository horarioRepository,
                         DocenteRepository docenteRepository,
+                        EstudianteRepository estudianteRepository,
                         UserRepository userRepository,
                         MateriaService materiaService,
-                        SeccionService seccionService) {
+                        SeccionService seccionService,
+                        MatriculaService matriculaService) {
         this.cursoRepository = cursoRepository;
         this.horarioRepository = horarioRepository;
         this.docenteRepository = docenteRepository;
+        this.estudianteRepository = estudianteRepository;
         this.userRepository = userRepository;
         this.materiaService = materiaService;
         this.seccionService = seccionService;
+        this.matriculaService = matriculaService;
     }
 
     @Transactional
@@ -92,6 +100,21 @@ public class CursoService {
             cursos = cursoRepository.findAll();
         }
         return cursos.stream().map(CursoResponse::desde).toList();
+    }
+
+    /** Los cursos de la sección del ESTUDIANTE (matrícula vigente). Sin matrícula: lista vacía. */
+    @Transactional(readOnly = true)
+    public List<CursoResponse> listarDelEstudiante(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new NotFoundException("Usuario no encontrado"));
+        Estudiante estudiante = estudianteRepository.findByUser(user)
+                .orElseThrow(() -> new NotFoundException("El usuario no tiene perfil Estudiante"));
+        return matriculaService.vigenteDe(estudiante.getId())
+                .map(matricula -> cursoRepository.findBySeccionId(matricula.getSeccion().getId()))
+                .orElse(List.of())
+                .stream()
+                .map(CursoResponse::desde)
+                .toList();
     }
 
     /**

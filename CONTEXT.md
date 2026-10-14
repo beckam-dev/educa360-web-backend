@@ -25,7 +25,7 @@
   - `security`: `SecurityConfig` (SecurityFilterChain + CORS), `JwtService`, `JwtAuthenticationFilter`, `AppUserDetailsService`.
   - `service`: `AuthService` (login, registro, `/me`) y `LoginAttemptService` (límite de intentos de login).
   - `exception`: `GlobalExceptionHandler` (`@RestControllerAdvice`), `ApiError`, `ConflictException` (409) y `RateLimitedException` (429).
-- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 65 tests, ejecutados por el CI (GitHub Actions) en cada push.
+- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 79 tests, ejecutados por el CI (GitHub Actions) en cada push.
 - **Entorno:** Docker Compose (`docker compose up -d` → Postgres + backend). Los secretos viven en `.env` (no versionado; su plantilla vacía es `.env.example`) y el backend **no arranca** sin `APP_JWT_SECRET`. Postgres sólo escucha en `127.0.0.1`.
 
 ---
@@ -83,10 +83,11 @@
 5. ✅ `Seccion`:
    - `id`, `grado` (acotado a **1..5**: el sistema es sólo secundaria, sin campo `nivel`), `letra` (mayúscula), `aula` (texto libre, p. ej. "A-101" — **sin entidad `Aula`**; se extraerá como tabla si aparecen capacidad u horarios), `tutorId` (docente opcional), `periodoId`.
    - **Regla:** `grado+letra` es único DENTRO de un período — las secciones se re-forman cada período (así asistencia y matrícula quedan acotadas al período sin columnas extra).
-6. ✅ `Curso` (antes `AsignacionDocente`) / 📋 `Matricula`:
+6. ✅ `Curso` (antes `AsignacionDocente`) / ✅ `Matricula`:
    - `Curso`: la oferta concreta del período — docente × materia × sección. **Es "el curso" del colegio** (Matemática · 3°A · profe X); `Materia` es el catálogo ("lo que se enseña") y el `Curso` su instancia concreta. Único por (materia, sección); exige materia habilitada al docente y materia activa. El nombre anterior describía la *acción* de asignar; la clase ahora es la identidad que cuelgan asistencia, notas y materiales, y que carga su horario.
    - ✅ `HorarioBloque` (del curso): `cursoId`, `dia` (`LUNES`..`SABADO`), `horaInicio`, `horaFin` — sesión **semanal recurrente** (1:N: un curso se ve varias veces por semana). Sin solapes por sección ni por docente el mismo día.
-   - **Limitación de alcance:** no se implementará un módulo completo de matrículas. La `Matricula` se modela como un registro con estados (ej. `PENDIENTE`, `PAGADO`) gestionados por `SECRETARIA` y actualizados por reglas automáticas del sistema.
+   - ✅ `Matricula`: `estudianteId`, `seccionId` (de la que sale el período), `estado` (`PENDIENTE` → `PAGADO`, acción de `SECRETARIA`). Única por (estudiante, sección) y **ninguna segunda en el mismo período** (cambiar de sección dentro del período es un traslado). Sólo alumnos `ACTIVO`. Es la que da **sección vigente** al alumno (la del período `ABIERTO`): cuelgan de ella `/estudiante/cursos`, su ficha y los hijos del apoderado.
+   - **Limitación de alcance:** no se implementará un módulo completo de matrículas/pensiones. La `Matricula` es un registro con estados gestionados por `SECRETARIA` y actualizados por reglas automáticas del sistema.
 7. 📋 `Asistencia`:
    - `id`, `estudianteId`, `bloqueId` (el `HorarioBloque` del curso), `fecha`, `estado` (`PRESENTE`, `TARDANZA`, `FALTA`, `JUSTIFICADA`), `observacion`.
    - Se toma **por sesión (bloque)**: el tutor registra a su grupo en el bloque de la hora en curso — de ahí que el horario fuera indispensable.
@@ -109,14 +110,14 @@
 - Gestión de usuarios y perfiles: altas por rol con cuenta y perfil creados en la misma transacción, en dos zonas — personal (`/api/v1/admin/{usuarios,docentes,secretarias}`, sólo `ADMIN`) y alumnos/familias (`/api/v1/secretaria/{estudiantes,apoderados}`, `ADMIN` + `SECRETARIA`). Listado con filtros, edición, baja lógica y reseteo de contraseña en `/api/v1/admin/usuarios`. `/auth/register` queda reducido al arranque (sólo con BD vacía): un solo camino de creación, sin duplicidades.
 - Catálogo académico (Módulo 2, todo `ADMIN`): períodos (**sólo uno `ABIERTO` a la vez**, nacen `CERRADOS`), materias del catálogo (CRUD + archivar con `activa`), secciones por período (grado 1..5, `grado+letra` único por período, tutor opcional), **habilitaciones** de materia por docente (`GET|PUT /admin/docentes/{id}/materias`, el `PUT` reemplaza el conjunto), **cursos** (`GET|POST|DELETE /admin/cursos` — únicos por materia+sección, exigen habilitación y materia activa; baja física) y su **horario** (`GET|PUT /admin/cursos/{id}/horario`: bloques semanales sin solapes por sección ni por docente).
 - Vistas por rol para el front (cierre del Módulo 2): `GET /docente/cursos` (el docente sólo ve los suyos), `GET /admin/docentes` (id de perfil + título + materias, para habilitar) y `/auth/me` con el perfil del rol. Dos bugs corregidos en el camino: el re-PUT idéntico del horario (el unique veía la hoja nueva antes de borrar la vieja; resuelto con `flush()` explícito) y `application.properties` esperaba `APP_LOGIN_*` cuando compose/.env exportan `APP_SECURITY_LOGIN_*` (siempre caían los defaults).
-- 13 entidades: `Auditable`, `User`, `Docente`, `Estudiante`, `Apoderado`, `Secretaria`, `Materia`, `Telefono`, `ApoderadoEstudiante`, `PeriodoAcademico`, `Seccion`, `Curso`, `HorarioBloque`.
-- 65 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
+- Estudiantes, matrículas y representados (Módulo 3): `Matricula` con sus reglas (nace `PENDIENTE`, única por (estudiante, sección), ninguna segunda en el mismo período, sólo alumnos `ACTIVO`; `PAGADO` es acción de Secretaría), **vínculos apoderado-estudiante** con baja lógica y un solo responsable principal, y las tres zonas del perfil: `GET /apoderado/hijos` (sus hijos con su sección vigente), `GET /estudiante/cursos` (los de su sección; vacío sin matrícula) y `/auth/me` con sección del estudiante e hijos del apoderado. Listados de Secretaría con `EstudianteResponse` (sección, matrícula y apoderados — nace aquí, sin reutilizar `UsuarioResponse`) y `ApoderadoResponse` (+ `?q=`).
+- 14 entidades: `Auditable`, `User`, `Docente`, `Estudiante`, `Apoderado`, `Secretaria`, `Materia`, `Telefono`, `ApoderadoEstudiante`, `PeriodoAcademico`, `Seccion`, `Curso`, `HorarioBloque`, `Matricula`.
+- 79 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
 - Docker Compose (Postgres + backend) con secretos fuera de Git y `.env.example` para el equipo.
 - Documentación interactiva en Swagger: `http://localhost:8080/swagger-ui/index.html`.
 
 **Pendiente (por módulo):**
-- Representados de apoderados (`ApoderadoEstudiante`): vendrá con el módulo de matrículas — y con él, `GET /api/v1/apoderado/hijos`.
-- Estudiantes y matrículas (`SECRETARIA`): su listado `GET /api/v1/secretaria/estudiantes` y los estados de matrícula. **Ahí nacerá `EstudianteResponse`** (con sección, matrícula y apoderado), junto con la edición acotada de la ficha del alumno; no antes, y sin reutilizar `UsuarioResponse` para ese listado — es la vista de cuentas de ADMIN, no la de alumnos de Secretaría. Con la matrícula en pie se desbloquean además `POST /api/v1/secretaria/matriculas`, `GET /api/v1/estudiante/cursos` (los de su sección) y el `perfil` de ESTUDIANTE/APODERADO en `/auth/me` — todo lo que el front necesita para desmockear la zona de familias.
+- Estudiantes (`SECRETARIA`): la **edición acotada de la ficha del alumno** (fecha de nacimiento, estado académico `TRASLADADO/RETIRADO/EGRESADO`) — la baja de la cuenta ya existe en `/admin/usuarios/{id}/activo`. Pensiones: fuera de alcance por ahora (§4, limitación de alcance).
 - Asistencia diaria y calificaciones vigesimales.
 - Tickets de justificación (apoderado → secretaria) y su efecto automático sobre la asistencia.
 - Materiales de clase y comunicados.
@@ -126,7 +127,7 @@
 **Cómo se ejecuta:**
 - `docker compose up -d` → Postgres (sólo accesible en `127.0.0.1`) + backend en `http://localhost:8080`.
 - `./mvnw spring-boot:run` → desarrollo con recarga; usa el mismo Postgres de Docker.
-- `./mvnw test` → 65 tests contra una PostgreSQL efímera (requiere Docker; sin él se saltan).
+- `./mvnw test` → 79 tests contra una PostgreSQL efímera (requiere Docker; sin él se saltan).
 - Alta inicial: la primera cuenta se crea con `POST /api/v1/auth/register` (sólo con BD vacía) y queda como `ADMIN`; en cuanto hay una, ese endpoint se cierra y todo lo demás se gestiona en `/api/v1/admin/...`.
 
 ---
@@ -169,6 +170,16 @@
   - `GET|POST /api/v1/admin/cursos` (`?seccionId=`, `?docenteId=`), `DELETE /{id}`: el período **no se pide** (viene de la sección). Reglas → `409`: único por (materia, sección) — nadie más da Matemáticas en 3°A —, docente sin la materia habilitada y materia desactivada. La baja es **física** (`DELETE`): es configuración del período, no histórico de personas (eso sí se desactiva, como `User.activo`) — y se lleva por delante su horario.
   - `GET|PUT /api/v1/admin/cursos/{id}/horario`: el horario es **1:N** (`HorarioBloque`, sesión semanal recurrente — un curso se ve varias veces por semana). El `PUT` reemplaza la **hoja entera** (misma filosofía que las habilitaciones; repetir la hoja idéntica es un no-op `200`). Reglas → `400` si un bloque termina antes de empezar; `409` por solapes: ni con otro curso de la misma sección ni con otro del mismo docente el mismo día (los bloques consecutivos no solapan: 09:00 fin / 09:00 inicio). La asistencia futura colgará de (bloque, fecha).
   - **Diferidos, con su disparador escrito:** `Unidad`/contenidos (cuando las notas se agrupen por unidad) y `Aula` como entidad (si aparecen capacidad u horarios institucionales). ~~Horario~~: ya implementado.
+- **Estudiantes, matrículas y representados (Módulo 3):**
+  - Zona `SECRETARIA` (con `ADMIN` como superconjunto):
+    - `GET /api/v1/secretaria/estudiantes` (`?q=`, `?estado=`) → **`EstudianteResponse`**: ficha + **sección/matrícula del período vigente + apoderados** (nace aquí; NO reutiliza `UsuarioResponse`, que es la vista de cuentas de ADMIN).
+    - `GET /api/v1/secretaria/apoderados` (`?q=`) → `ApoderadoResponse` con sus hijos básicos.
+    - `POST /api/v1/secretaria/matriculas` `{estudianteId, seccionId}` → nace **`PENDIENTE`**. Reglas → `404` si no existe el alumno o la sección; `409` si ya está en esa sección, si ya tiene otra matrícula en el **mismo período** (eso es un traslado) o si el alumno no está `ACTIVO`.
+    - `PATCH /api/v1/secretaria/matriculas/{id}/estado` `{estado}` → paso a `PAGADO` **como acción de Secretaría** (nunca automático).
+    - `POST|DELETE /api/v1/secretaria/apoderados/{id}/representados`: los vínculos los **crea Secretaría** (el apoderado no se asigna hijos). `parentesco` (`PADRE|MADRE|TUTOR|HERMANO|OTRO`) y `responsablePrincipal` — **sólo UNO principal por estudiante**: al nombrar uno nuevo, el anterior deja de serlo. El `DELETE` es baja **lógica** (`activo=false`, queda el historial) y re-vincular reactiva el par (`201`) sin duplicarlo; `404` si no estaba activo.
+  - **Zona APODERADO** — `GET /api/v1/apoderado/hijos`: **sus** hijos formalmente asignados, con la **sección del período `ABIERTO`** (sección/matrícula `null` si aún no está matriculado o no hay período abierto). Identidad del token: no recibe ids, no puede pedir los de nadie más.
+  - **Zona ESTUDIANTE** — `GET /api/v1/estudiante/cursos`: los cursos de **su** sección vigente. Sin matrícula → lista vacía (no es error: es un alumno aún no inscrito).
+  - `/auth/me` ampliado: el `ESTUDIANTE` trae `seccionEtiqueta`/`periodoNombre`/`matriculaEstado` y el `APODERADO` su lista de `hijos` — el perfil de una sola llamada, por rol.
 - **Flujo de Justificaciones:**
   - Solo el apoderado puede registrar solicitudes de justificación para sus representados.
   - La `SECRETARIA` revisa el sustento; si lo aprueba, se actualiza el estado de la asistencia del estudiante de forma transaccional.
