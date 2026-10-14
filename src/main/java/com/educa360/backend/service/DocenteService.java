@@ -2,6 +2,7 @@ package com.educa360.backend.service;
 
 import com.educa360.backend.dto.DocenteMateriasRequest;
 import com.educa360.backend.dto.DocenteRequest;
+import com.educa360.backend.dto.DocenteResponse;
 import com.educa360.backend.dto.MateriaResponse;
 import com.educa360.backend.dto.UsuarioBasicoRequest;
 import com.educa360.backend.dto.UsuarioResponse;
@@ -45,6 +46,16 @@ public class DocenteService {
         User user = usuarioService.crearCuenta(datos, User.Role.DOCENTE);
         docenteRepository.save(new Docente(user, perfil.titulo()));
         return usuarioService.aRespuesta(user);
+    }
+
+    /**
+     * Listado para el panel de ADMIN: id de PERFIL + título + materias
+     * habilitadas — la materia prima de la pantalla de habilitaciones
+     * (los ids de perfil no salen en UsuarioResponse, por decisión propia).
+     */
+    @Transactional(readOnly = true)
+    public List<DocenteResponse> listar() {
+        return docenteRepository.findAll().stream().map(DocenteResponse::desde).toList();
     }
 
     /** Materias habilitadas del docente (ficha del docente en el panel). */

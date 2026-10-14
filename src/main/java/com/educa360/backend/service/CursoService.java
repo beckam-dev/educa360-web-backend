@@ -9,12 +9,14 @@ import com.educa360.backend.entity.Docente;
 import com.educa360.backend.entity.HorarioBloque;
 import com.educa360.backend.entity.Materia;
 import com.educa360.backend.entity.Seccion;
+import com.educa360.backend.entity.User;
 import com.educa360.backend.exception.BadRequestException;
 import com.educa360.backend.exception.ConflictException;
 import com.educa360.backend.exception.NotFoundException;
 import com.educa360.backend.repository.CursoRepository;
 import com.educa360.backend.repository.DocenteRepository;
 import com.educa360.backend.repository.HorarioBloqueRepository;
+import com.educa360.backend.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,17 +40,20 @@ public class CursoService {
     private final CursoRepository cursoRepository;
     private final HorarioBloqueRepository horarioRepository;
     private final DocenteRepository docenteRepository;
+    private final UserRepository userRepository;
     private final MateriaService materiaService;
     private final SeccionService seccionService;
 
     public CursoService(CursoRepository cursoRepository,
                         HorarioBloqueRepository horarioRepository,
                         DocenteRepository docenteRepository,
+                        UserRepository userRepository,
                         MateriaService materiaService,
                         SeccionService seccionService) {
         this.cursoRepository = cursoRepository;
         this.horarioRepository = horarioRepository;
         this.docenteRepository = docenteRepository;
+        this.userRepository = userRepository;
         this.materiaService = materiaService;
         this.seccionService = seccionService;
     }
@@ -87,6 +92,24 @@ public class CursoService {
             cursos = cursoRepository.findAll();
         }
         return cursos.stream().map(CursoResponse::desde).toList();
+    }
+
+    /**
+     * Los cursos del DOCENTE autenticado (zona /docente/cursos).
+     *
+     * La ruta no admite filtros: el dueño de los datos sale del token, que es
+     * quien no puede falsear la consulta — así el docente sólo ve SUS cursos
+     * (§5, acceso a datos por perfil).
+     */
+    @Transactional(readOnly = true)
+    public List<CursoResponse> listarDelDocente(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new NotFoundException("Usuario no encontrado"));
+        Docente docente = docenteRepository.findByUser(user)
+                .orElseThrow(() -> new NotFoundException("El usuario no tiene perfil Docente"));
+        return cursoRepository.findByDocenteId(docente.getId()).stream()
+                .map(CursoResponse::desde)
+                .toList();
     }
 
     /**
@@ -156,6 +179,10 @@ public class CursoService {
 
         List<HorarioBloque> previos = horarioRepository.findByCursoId(cursoId);
         horarioRepository.deleteAll(previos); // la hoja vieja se va entera
+        // Los deletes a BD ANTES de encolar los inserts: sin este flush, el unique
+        // (curso, día, hora_inicio) ve primero la hoja nueva y responde 409 aunque
+        // la vieja esté en camino de borrarse (re-PUT idéntico = falso conflicto).
+        horarioRepository.flush();
         return horarioRepository.saveAll(nuevos).stream()
                 .map(HorarioBloqueResponse::desde)
                 .toList();

@@ -393,6 +393,23 @@ class CatalogoAcademicoApiTest {
     }
 
     @Test
+    @DisplayName("Re-PUT idéntico de la hoja es 200 (no 409): repetir no cambia nada")
+    void rePutIdenticoDelHorarioEsValido() throws Exception {
+        long cursoId = cursoDeUnDocente("doc1@educa360.pe", "20000011", "Matematicas");
+        String hoja = """
+                {"bloques":[{"dia":"LUNES","horaInicio":"08:00","horaFin":"09:00"},
+                             {"dia":"MARTES","horaInicio":"08:00","horaFin":"09:00"}]}""";
+
+        assertEquals(200, putHorario(cursoId, hoja));
+        MvcResult segunda = conToken(put(CURSOS + "/" + cursoId + "/horario")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(hoja), admin);
+        assertEquals(200, segunda.getResponse().getStatus(),
+                "repetir la hoja idéntica debe ser un no-op de 200: "
+                        + segunda.getResponse().getContentAsString());
+    }
+
+    @Test
     @DisplayName("Bloque con horas invertidas o día inválido responde 400")
     void horarioInvalidoResponde400() throws Exception {
         long cursoId = cursoDeUnDocente("doc1@educa360.pe", "20000011", "Matematicas");
@@ -403,6 +420,67 @@ class CatalogoAcademicoApiTest {
         assertEquals(400, putHorario(cursoId, """
                 {"bloques":[{"dia":"DOMINGO","horaInicio":"08:00","horaFin":"09:00"}]}"""),
                 "día fuera del enum");
+    }
+
+    // ==================== Zonas por rol ====================
+
+    @Test
+    @DisplayName("El DOCENTE ve SÓLO sus cursos desde /docente/cursos")
+    void docenteVeSoloSusCursos() throws Exception {
+        long dana = crearDocente("doc1@educa360.pe", "20000011");
+        long elva = crearDocente("doc2@educa360.pe", "20000012");
+        long matematicas = crearMateria("Matematicas");
+        long fisica = crearMateria("Fisica");
+        long periodo = crearPeriodo("2026", "2026-03-02", "2026-12-18");
+        long seccion3A = nuevaSeccion(3, "A", periodo);
+        long seccion4B = nuevaSeccion(4, "B", periodo);
+        habilitar(dana, "[%d]".formatted(matematicas));
+        habilitar(elva, "[%d]".formatted(fisica));
+        nuevoCurso(dana, matematicas, seccion3A);
+        nuevoCurso(elva, fisica, seccion4B);
+
+        String tokenDana = loginYToken("doc1@educa360.pe", "Docente1234");
+        String cursos = conToken(get("/api/v1/docente/cursos"), tokenDana)
+                .getResponse().getContentAsString();
+        assertTrue(cursos.contains("Matematicas"), "ve el suyo: " + cursos);
+        assertFalse(cursos.contains("Fisica"), "no ve los cursos del otro docente");
+
+        assertEquals(403, conToken(get("/api/v1/docente/cursos"), admin).getResponse().getStatus(),
+                "la zona /docente es sólo para DOCENTE: ADMIN no es docente");
+    }
+
+    @Test
+    @DisplayName("GET /admin/docentes expone el id de PERFIL con título y materias")
+    void listarDocentesExponeElPerfilId() throws Exception {
+        long dana = crearDocente("doc1@educa360.pe", "20000011");
+        long matematicas = crearMateria("Matematicas");
+        habilitar(dana, "[%d]".formatted(matematicas));
+
+        String cuerpo = conToken(get("/api/v1/admin/docentes"), admin)
+                .getResponse().getContentAsString();
+        assertTrue(cuerpo.contains("\"titulo\":\"Lic. en Matematicas\""), "el título debe viajar: " + cuerpo);
+        assertTrue(cuerpo.contains("Matematicas"), "las materias habilitadas deben venir");
+        assertTrue(cuerpo.contains("\"id\":%d".formatted(dana)),
+                "el front necesita el id de perfil para /admin/docentes/{id}/materias");
+    }
+
+    @Test
+    @DisplayName("/auth/me trae el perfil del DOCENTE (título y materias) en una sola llamada")
+    void meDelDocenteTraeElPerfil() throws Exception {
+        long dana = crearDocente("doc1@educa360.pe", "20000011");
+        long matematicas = crearMateria("Matematicas");
+        habilitar(dana, "[%d]".formatted(matematicas));
+
+        String tokenDana = loginYToken("doc1@educa360.pe", "Docente1234");
+        String cuerpo = conToken(get("/api/v1/auth/me"), tokenDana)
+                .getResponse().getContentAsString();
+        assertTrue(cuerpo.contains("\"rol\":\"DOCENTE\""));
+        assertTrue(cuerpo.contains("\"titulo\":\"Lic. en Matematicas\""), "el perfil debe venir: " + cuerpo);
+        assertTrue(cuerpo.contains("Matematicas"), "con sus materias habilitadas");
+
+        String meAdmin = conToken(get("/api/v1/auth/me"), admin)
+                .getResponse().getContentAsString();
+        assertTrue(meAdmin.contains("\"perfil\":null"), "ADMIN no tiene perfil propio todavía: " + meAdmin);
     }
 
     // ==================== RBAC ====================

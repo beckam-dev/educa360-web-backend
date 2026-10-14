@@ -2,6 +2,7 @@ package com.educa360.backend.controller;
 
 import com.educa360.backend.dto.DocenteMateriasRequest;
 import com.educa360.backend.dto.DocenteRequest;
+import com.educa360.backend.dto.DocenteResponse;
 import com.educa360.backend.dto.MateriaResponse;
 import com.educa360.backend.dto.UsuarioBasicoRequest;
 import com.educa360.backend.dto.UsuarioResponse;
@@ -44,6 +45,12 @@ public class DocenteController {
             @Valid @RequestBody Cuerpo body) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(docenteService.crear(body.usuario(), body.perfil()));
+    }
+
+    /** Listado con id de perfil, título y materias habilitadas (pantalla de habilitaciones). */
+    @GetMapping
+    public ResponseEntity<List<DocenteResponse>> listar() {
+        return ResponseEntity.ok(docenteService.listar());
     }
 
     // Habilitaciones de materia: "qué puede enseñar" (el alta de cursos lo exige)

@@ -2,10 +2,14 @@ package com.educa360.backend.service;
 
 import com.educa360.backend.dto.AuthResponse;
 import com.educa360.backend.dto.LoginRequest;
+import com.educa360.backend.dto.MateriaResponse;
+import com.educa360.backend.dto.MePerfilResponse;
+import com.educa360.backend.dto.MeResponse;
 import com.educa360.backend.dto.UsuarioBasicoRequest;
 import com.educa360.backend.dto.UserResponse;
 import com.educa360.backend.entity.User;
 import com.educa360.backend.exception.RateLimitedException;
+import com.educa360.backend.repository.DocenteRepository;
 import com.educa360.backend.repository.UserRepository;
 import com.educa360.backend.security.JwtService;
 import org.springframework.security.access.AccessDeniedException;
@@ -25,19 +29,22 @@ public class AuthService {
     private final JwtService jwtService;
     private final LoginAttemptService loginAttempts;
     private final UsuarioService usuarioService;
+    private final DocenteRepository docenteRepository;
 
     public AuthService(
             UserRepository userRepository,
             AuthenticationManager authenticationManager,
             JwtService jwtService,
             LoginAttemptService loginAttempts,
-            UsuarioService usuarioService
+            UsuarioService usuarioService,
+            DocenteRepository docenteRepository
     ) {
         this.userRepository = userRepository;
         this.authenticationManager = authenticationManager;
         this.jwtService = jwtService;
         this.loginAttempts = loginAttempts;
         this.usuarioService = usuarioService;
+        this.docenteRepository = docenteRepository;
     }
 
     /**
@@ -103,12 +110,32 @@ public class AuthService {
         return buildAuthResponse(guardado);
     }
 
-    /** Perfil del usuario contenido en el token. */
+    /**
+     * Perfil del usuario contenido en el token: la cuenta + el perfil de su
+     * rol en UNA llamada (la pantalla de perfil no debería hacer N peticiones
+     * ni asumir ids).
+     */
     @Transactional(readOnly = true)
-    public UserResponse me(String email) {
+    public MeResponse me(String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UsernameNotFoundException("Usuario no encontrado"));
-        return UserResponse.from(user);
+        return new MeResponse(UserResponse.from(user), perfilDe(user));
+    }
+
+    /**
+     * El perfil varía por rol: hoy sólo el DOCENTE trae datos (título y
+     * materias). El Módulo 3 añadirá la sección del ESTUDIANTE y los hijos
+     * del APODERADO; los demás roles llevan perfil null.
+     */
+    private MePerfilResponse perfilDe(User user) {
+        if (user.getRol() != User.Role.DOCENTE) {
+            return null;
+        }
+        return docenteRepository.findByUser(user)
+                .map(docente -> new MePerfilResponse(
+                        docente.getTitulo(),
+                        docente.getMaterias().stream().map(MateriaResponse::desde).toList()))
+                .orElse(null);
     }
 
     private AuthResponse buildAuthResponse(User user) {

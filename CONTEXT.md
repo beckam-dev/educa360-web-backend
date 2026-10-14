@@ -25,7 +25,7 @@
   - `security`: `SecurityConfig` (SecurityFilterChain + CORS), `JwtService`, `JwtAuthenticationFilter`, `AppUserDetailsService`.
   - `service`: `AuthService` (login, registro, `/me`) y `LoginAttemptService` (límite de intentos de login).
   - `exception`: `GlobalExceptionHandler` (`@RestControllerAdvice`), `ApiError`, `ConflictException` (409) y `RateLimitedException` (429).
-- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 61 tests, ejecutados por el CI (GitHub Actions) en cada push.
+- **Pruebas:** JUnit 5 + MockMvc + **Testcontainers** (PostgreSQL 17 efímera por clase: no toca la BD de desarrollo). `./mvnw test` → 65 tests, ejecutados por el CI (GitHub Actions) en cada push.
 - **Entorno:** Docker Compose (`docker compose up -d` → Postgres + backend). Los secretos viven en `.env` (no versionado; su plantilla vacía es `.env.example`) y el backend **no arranca** sin `APP_JWT_SECRET`. Postgres sólo escucha en `127.0.0.1`.
 
 ---
@@ -108,14 +108,15 @@
 - Autenticación y autorización: login JWT, registro con alta inicial, `/me`, RBAC por rol, límite de intentos, errores uniformes en JSON y CORS para el SPA.
 - Gestión de usuarios y perfiles: altas por rol con cuenta y perfil creados en la misma transacción, en dos zonas — personal (`/api/v1/admin/{usuarios,docentes,secretarias}`, sólo `ADMIN`) y alumnos/familias (`/api/v1/secretaria/{estudiantes,apoderados}`, `ADMIN` + `SECRETARIA`). Listado con filtros, edición, baja lógica y reseteo de contraseña en `/api/v1/admin/usuarios`. `/auth/register` queda reducido al arranque (sólo con BD vacía): un solo camino de creación, sin duplicidades.
 - Catálogo académico (Módulo 2, todo `ADMIN`): períodos (**sólo uno `ABIERTO` a la vez**, nacen `CERRADOS`), materias del catálogo (CRUD + archivar con `activa`), secciones por período (grado 1..5, `grado+letra` único por período, tutor opcional), **habilitaciones** de materia por docente (`GET|PUT /admin/docentes/{id}/materias`, el `PUT` reemplaza el conjunto), **cursos** (`GET|POST|DELETE /admin/cursos` — únicos por materia+sección, exigen habilitación y materia activa; baja física) y su **horario** (`GET|PUT /admin/cursos/{id}/horario`: bloques semanales sin solapes por sección ni por docente).
+- Vistas por rol para el front (cierre del Módulo 2): `GET /docente/cursos` (el docente sólo ve los suyos), `GET /admin/docentes` (id de perfil + título + materias, para habilitar) y `/auth/me` con el perfil del rol. Dos bugs corregidos en el camino: el re-PUT idéntico del horario (el unique veía la hoja nueva antes de borrar la vieja; resuelto con `flush()` explícito) y `application.properties` esperaba `APP_LOGIN_*` cuando compose/.env exportan `APP_SECURITY_LOGIN_*` (siempre caían los defaults).
 - 13 entidades: `Auditable`, `User`, `Docente`, `Estudiante`, `Apoderado`, `Secretaria`, `Materia`, `Telefono`, `ApoderadoEstudiante`, `PeriodoAcademico`, `Seccion`, `Curso`, `HorarioBloque`.
-- 61 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
+- 65 tests (unitarios + integración con Testcontainers) ejecutándose en el CI de GitHub Actions en cada push.
 - Docker Compose (Postgres + backend) con secretos fuera de Git y `.env.example` para el equipo.
 - Documentación interactiva en Swagger: `http://localhost:8080/swagger-ui/index.html`.
 
 **Pendiente (por módulo):**
-- Representados de apoderados (`ApoderadoEstudiante`): vendrá con el módulo de matrículas.
-- Estudiantes y matrículas (`SECRETARIA`): su listado `GET /api/v1/secretaria/estudiantes` y los estados de matrícula. **Ahí nacerá `EstudianteResponse`** (con sección, matrícula y apoderado), junto con la edición acotada de la ficha del alumno; no antes, y sin reutilizar `UsuarioResponse` para ese listado — es la vista de cuentas de ADMIN, no la de alumnos de Secretaría.
+- Representados de apoderados (`ApoderadoEstudiante`): vendrá con el módulo de matrículas — y con él, `GET /api/v1/apoderado/hijos`.
+- Estudiantes y matrículas (`SECRETARIA`): su listado `GET /api/v1/secretaria/estudiantes` y los estados de matrícula. **Ahí nacerá `EstudianteResponse`** (con sección, matrícula y apoderado), junto con la edición acotada de la ficha del alumno; no antes, y sin reutilizar `UsuarioResponse` para ese listado — es la vista de cuentas de ADMIN, no la de alumnos de Secretaría. Con la matrícula en pie se desbloquean además `POST /api/v1/secretaria/matriculas`, `GET /api/v1/estudiante/cursos` (los de su sección) y el `perfil` de ESTUDIANTE/APODERADO en `/auth/me` — todo lo que el front necesita para desmockear la zona de familias.
 - Asistencia diaria y calificaciones vigesimales.
 - Tickets de justificación (apoderado → secretaria) y su efecto automático sobre la asistencia.
 - Materiales de clase y comunicados.
@@ -125,7 +126,7 @@
 **Cómo se ejecuta:**
 - `docker compose up -d` → Postgres (sólo accesible en `127.0.0.1`) + backend en `http://localhost:8080`.
 - `./mvnw spring-boot:run` → desarrollo con recarga; usa el mismo Postgres de Docker.
-- `./mvnw test` → 61 tests contra una PostgreSQL efímera (requiere Docker; sin él se saltan).
+- `./mvnw test` → 65 tests contra una PostgreSQL efímera (requiere Docker; sin él se saltan).
 - Alta inicial: la primera cuenta se crea con `POST /api/v1/auth/register` (sólo con BD vacía) y queda como `ADMIN`; en cuanto hay una, ese endpoint se cierra y todo lo demás se gestiona en `/api/v1/admin/...`.
 
 ---
@@ -135,7 +136,7 @@
   - `POST /api/v1/auth/login` (`{email, password}`) → `200` con `{token, tokenType: "Bearer", expiresIn (segundos), user}`.
   - **Límite de intentos (anti fuerza bruta):** 5 fallos dentro de 15 minutos bloquean el login durante 15 minutos (medidos desde el último fallo) → `429` con header `Retry-After`. Un acierto reinicia el contador y la clave es `email+IP`, para que el que queda bloqueado sea el que falla y no la víctima. Se comprueba antes de validar la contraseña. El estado vive en memoria (se pierde al reiniciar; con varias instancias haría falta Redis). Configurable con `app.security.login.*`.
   - `POST /api/v1/auth/register` → **arranque del sistema** (`UsuarioBasicoRequest`: email, contraseña, nombres, apellidos, DNI, teléfonos). Funciona **únicamente con la BD vacía**: cualquiera crea la primera cuenta y nace **siempre `ADMIN`** (si naciera con otro rol, el sistema quedaría bloqueado, ya que a partir de ahí sólo un ADMIN podría crear cuentas; el "truco" además neutraliza la condición de carrera de `count()`, porque el peor caso son dos ADMIN, nunca un sistema sin administradores). En cuanto existe una sola cuenta, responde `403` — **incluso con token de ADMIN** — y todas las altas pasan a `/api/v1/admin/{usuarios,docentes,estudiantes,secretarias,apoderados}`, donde cada servicio crea la cuenta **y su perfil** con los datos que el rol exige. Un solo interruptor + una sola zona de gestión = sin caminos paralelos. Todas las altas pasan por `UsuarioService.crearCuenta()` → una sola verdad (unicidad de email/DNI, hash BCrypt, teléfonos) y ninguna cuenta a medias. El email se normaliza a minúsculas y el DNI debe tener 8 dígitos.
-  - `GET /api/v1/auth/me` → perfil del usuario contenido en el token.
+  - `GET /api/v1/auth/me` → la cuenta + el perfil de su rol en **UNA llamada** (`{usuario, perfil}`): hoy el `DOCENTE` trae título y materias habilitadas; el `ESTUDIANTE` añadirá su sección y el `APODERADO` sus hijos con el Módulo 3 (los demás roles, `perfil: null`).
   - El cliente envía `Authorization: Bearer <token>` en cada petición. API **stateless**: sin sesiones ni cookies.
   - Errores en JSON (`ApiError`, sin stack traces): `400` validación de DTO con detalle campo a campo o cuerpo ilegible, `401` credenciales inválidas o token ausente, `403` usuario inactivo o sin permiso, `404`/`405`/`415` para ruta, método o `Content-Type` incorrectos, `409` email/DNI duplicado, `429` límite de intentos de login, `500` sólo para fallos inesperados.
   - `AppCORS`: orígenes del SPA por propiedad `app.cors.allowed-origins` (sin credenciales: la auth va en el header).
@@ -163,8 +164,10 @@
   - `GET|POST /api/v1/admin/materias`, `PUT /{id}`, `PATCH /{id}/activa`: nombre único (`409`). `activa=false` **impide nuevas asignaciones** sin tocar las existentes — es un "ya no la damos más", no un borrado.
   - `GET|POST /api/v1/admin/secciones` (`?periodoId=`), `PUT /{id}`: grado acotado a **1..5** (sólo secundaria, sin campo `nivel`), letra en mayúscula, `aula` como **texto** (sin entidad `Aula`: se extraerá si aparecen capacidad u horarios), tutor opcional. `grado+letra` único por período (`409`) y **no se mueve de período** (`409`: se crea otra fila — arrastrarla rompería el histórico por período).
   - `GET|PUT /api/v1/admin/docentes/{id}/materias`: las **habilitaciones** del docente ("qué puede enseñar"). El `PUT` **reemplaza el conjunto completo** (misma filosofía que los teléfonos): se envía la lista entera — o vacía para dejarlo sin materias.
+  - `GET /api/v1/admin/docentes`: listado con **id de PERFIL**, título, materias habilitadas y estado (`DocenteResponse`) — la pantalla de habilitaciones necesita el id del perfil, que no sale en `UsuarioResponse`: cada pantalla, su salida.
+  - **Zona DOCENTE** — `GET /api/v1/docente/cursos`: **sus** cursos (materia, sección, período). Sin filtros: la identidad sale del token, que no puede falsearse (§5, acceso a datos por perfil). `ADMIN` no entra (`403`: la zona es del dueño de los datos).
   - `GET|POST /api/v1/admin/cursos` (`?seccionId=`, `?docenteId=`), `DELETE /{id}`: el período **no se pide** (viene de la sección). Reglas → `409`: único por (materia, sección) — nadie más da Matemáticas en 3°A —, docente sin la materia habilitada y materia desactivada. La baja es **física** (`DELETE`): es configuración del período, no histórico de personas (eso sí se desactiva, como `User.activo`) — y se lleva por delante su horario.
-  - `GET|PUT /api/v1/admin/cursos/{id}/horario`: el horario es **1:N** (`HorarioBloque`, sesión semanal recurrente — un curso se ve varias veces por semana). El `PUT` reemplaza la **hoja entera** (misma filosofía que las habilitaciones). Reglas → `400` si un bloque termina antes de empezar; `409` por solapes: ni con otro curso de la misma sección ni con otro del mismo docente el mismo día (los bloques consecutivos no solapan: 09:00 fin / 09:00 inicio). La asistencia futura colgará de (bloque, fecha).
+  - `GET|PUT /api/v1/admin/cursos/{id}/horario`: el horario es **1:N** (`HorarioBloque`, sesión semanal recurrente — un curso se ve varias veces por semana). El `PUT` reemplaza la **hoja entera** (misma filosofía que las habilitaciones; repetir la hoja idéntica es un no-op `200`). Reglas → `400` si un bloque termina antes de empezar; `409` por solapes: ni con otro curso de la misma sección ni con otro del mismo docente el mismo día (los bloques consecutivos no solapan: 09:00 fin / 09:00 inicio). La asistencia futura colgará de (bloque, fecha).
   - **Diferidos, con su disparador escrito:** `Unidad`/contenidos (cuando las notas se agrupen por unidad) y `Aula` como entidad (si aparecen capacidad u horarios institucionales). ~~Horario~~: ya implementado.
 - **Flujo de Justificaciones:**
   - Solo el apoderado puede registrar solicitudes de justificación para sus representados.

@@ -2,8 +2,8 @@ package com.educa360.backend.controller;
 
 import com.educa360.backend.dto.AuthResponse;
 import com.educa360.backend.dto.LoginRequest;
+import com.educa360.backend.dto.MeResponse;
 import com.educa360.backend.dto.UsuarioBasicoRequest;
-import com.educa360.backend.dto.UserResponse;
 import com.educa360.backend.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -50,9 +50,9 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
     }
 
-    /** GET /api/v1/auth/me -> perfil del usuario del token */
+    /** GET /api/v1/auth/me -> la cuenta + el perfil de su rol (título/materias del docente) */
     @GetMapping("/me")
-    public ResponseEntity<UserResponse> me(Authentication authentication) {
+    public ResponseEntity<MeResponse> me(Authentication authentication) {
         return ResponseEntity.ok(authService.me(authentication.getName()));
     }
 }
